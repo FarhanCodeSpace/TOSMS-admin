@@ -38,6 +38,7 @@ const currentMonthString = format(today, "yyyy-MM");
 
 type RouteRecord = {
   routeId: string;
+  routeName?: string;
   name?: string;
   isActive?: boolean;
   assignedDriverId?: string;
@@ -371,7 +372,7 @@ export default function DashboardPage() {
 
       return {
         routeId: route.routeId,
-        name: route.name ?? route.routeId,
+        name: route.routeName ?? route.name ?? "Unnamed Route",
         driverStatus,
         driverLabel,
         availableCount,
@@ -461,11 +462,11 @@ export default function DashboardPage() {
       </section>
 
       {/* Today's Availability Overview */}
-      <section className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
+      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              Today's Availability Overview
+              Today&apos;s Availability Overview
             </h2>
             <p className="mt-1 text-sm text-gray-600">
               Route availability summary
@@ -554,7 +555,7 @@ export default function DashboardPage() {
       {/* Two Column Layout: Fee Collection & Recent Activity */}
       <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
         {/* Fee Collection */}
-        <section className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
+        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-6 flex items-start justify-between">
             <div>
               <h3 className="text-lg font-semibold text-gray-900">
@@ -645,20 +646,20 @@ export default function DashboardPage() {
         <button
           type="button"
           onClick={() => setIsRouteModalOpen(true)}
-          className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+          className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
         >
           + Create Route
         </button>
         <button
           type="button"
           onClick={() => setIsRideModalOpen(true)}
-          className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+          className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
         >
           + Create Ride
         </button>
         <Link
           href={{ pathname: "/drivers", query: { tab: "pending" } }}
-          className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+          className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
         >
           Approve Drivers
           {pendingDriversCount > 0 && (
@@ -669,7 +670,7 @@ export default function DashboardPage() {
         </Link>
         <Link
           href={{ pathname: "/availability" }}
-          className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+          className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
         >
           View Availability
         </Link>
@@ -707,7 +708,7 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => setIsRouteModalOpen(false)}
-              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
             >
               Cancel
             </button>
@@ -752,7 +753,7 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => setIsRideModalOpen(false)}
-              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
             >
               Cancel
             </button>

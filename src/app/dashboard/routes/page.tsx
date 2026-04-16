@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import {
   collection,
   onSnapshot,
@@ -10,22 +10,15 @@ import {
   doc,
 } from "firebase/firestore";
 import Link from "next/link";
-import {
-  Plus,
-  Edit,
-  Eye,
-  Users,
-  MapPin,
-  Clock,
-  MoreVertical,
-} from "lucide-react";
+import { Plus, Edit, Eye, Users, MapPin, Clock } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
 import { Route, User } from "@/types";
+import { formatTimeTo12Hour } from "@/utils/formatters";
 import Badge from "@/components/ui/Badge";
-import Modal from "@/components/ui/Modal";
+import AssignDriverModal from "@/components/routes/AssignDriverModal";
 import CreateRouteModal from "./CreateRouteModal";
 import EditRouteModal from "./EditRouteModal";
 
@@ -38,6 +31,7 @@ export default function RoutesPage() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingRoute, setEditingRoute] = useState<Route | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [assigningRoute, setAssigningRoute] = useState<Route | null>(null);
 
   // Fetch routes
   useEffect(() => {
@@ -156,7 +150,8 @@ export default function RoutesPage() {
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <Clock size={16} />
                   <span>
-                    {route.departureTime} - {route.returnTime}
+                    {formatTimeTo12Hour(route.departureTime)} -{" "}
+                    {formatTimeTo12Hour(route.returnTime)}
                   </span>
                 </div>
                 <div className="flex gap-2">
@@ -192,6 +187,12 @@ export default function RoutesPage() {
                 </label>
 
                 <div className="flex gap-2">
+                  <button
+                    onClick={() => setAssigningRoute(route)}
+                    className="rounded-md border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                  >
+                    {route.assignedDriverId ? "Change Driver" : "Assign Driver"}
+                  </button>
                   <Link
                     href={`/dashboard/routes/${route.routeId}`}
                     className="p-2 hover:bg-slate-100 rounded transition"
@@ -229,6 +230,13 @@ export default function RoutesPage() {
           open={editModalOpen}
           onClose={() => setEditModalOpen(false)}
           route={editingRoute}
+        />
+      )}
+      {assigningRoute && (
+        <AssignDriverModal
+          open={!!assigningRoute}
+          onClose={() => setAssigningRoute(null)}
+          route={assigningRoute}
         />
       )}
     </div>

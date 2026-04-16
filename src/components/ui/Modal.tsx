@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { ReactNode } from "react";
 
@@ -43,9 +44,9 @@ export default function Modal({
     return null;
   }
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/70 px-4 py-6"
       onClick={() => !isLoading && onClose()}
     >
       <div
@@ -70,6 +71,7 @@ export default function Modal({
           </div>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

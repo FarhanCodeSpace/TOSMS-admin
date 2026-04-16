@@ -9,7 +9,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const sidebarWidth = isSidebarCollapsed ? 80 : 256;
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-transparent">
       <Sidebar
         collapsed={isSidebarCollapsed}
         onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}

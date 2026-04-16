@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import Image from "next/image";
 import {
   collection,
   onSnapshot,
@@ -8,27 +9,18 @@ import {
   where,
   updateDoc,
   doc,
-  getDocs,
 } from "firebase/firestore";
-import {
-  Users,
-  AlertCircle,
-  Eye,
-  CheckCircle,
-  XCircle,
-  Search,
-  Loader2,
-} from "lucide-react";
+import { Users, AlertCircle, Search, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
 import type { User, Route } from "@/types";
-import Badge from "@/components/ui/Badge";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import Modal from "@/components/ui/Modal";
 import DriverCard from "@/components/drivers/DriverCard";
 import DriverTable from "@/components/drivers/DriverTable";
 import DriverDetailModal from "@/components/drivers/DriverDetailModal";
+import AssignDriverModal from "@/components/routes/AssignDriverModal";
 
 type TabType = "all" | "pending" | "approved" | "suspended";
 
@@ -36,7 +28,6 @@ export default function DriversPage() {
   const [activeTab, setActiveTab] = useState<TabType>("pending");
   const [allDrivers, setAllDrivers] = useState<User[]>([]);
   const [pendingDrivers, setPendingDrivers] = useState<User[]>([]);
-  const [approvedDrivers, setApprovedDrivers] = useState<User[]>([]);
   const [suspendedDrivers, setSuspendedDrivers] = useState<User[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,6 +38,12 @@ export default function DriversPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedDriver, setSelectedDriver] = useState<User | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [routePickerOpen, setRoutePickerOpen] = useState(false);
+  const [driverForRouteAssign, setDriverForRouteAssign] = useState<User | null>(
+    null,
+  );
+  const [selectedRouteId, setSelectedRouteId] = useState("");
+  const [assignModalRoute, setAssignModalRoute] = useState<Route | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
@@ -73,7 +70,9 @@ export default function DriversPage() {
     const unsubscribe = onSnapshot(
       collection(db, COLLECTIONS.ROUTES),
       (snapshot) => {
-        const routesData = snapshot.docs.map((doc) => doc.data() as Route);
+        const routesData = snapshot.docs.map(
+          (doc) => ({ ...doc.data(), routeId: doc.id }) as Route,
+        );
         setRoutes(routesData);
       },
     );
@@ -92,14 +91,10 @@ export default function DriversPage() {
         const pending = drivers.filter(
           (d) => d.approved === false && d.profileComplete === true,
         );
-        const approved = drivers.filter(
-          (d) => d.approved === true && d.status === "active",
-        );
         const suspended = drivers.filter((d) => d.status === "suspended");
 
         setAllDrivers(drivers);
         setPendingDrivers(pending);
-        setApprovedDrivers(approved);
         setSuspendedDrivers(suspended);
         setLoading(false);
 
@@ -110,7 +105,7 @@ export default function DriversPage() {
       },
     );
     return () => unsubscribe();
-  }, []);
+  }, [activeTab]);
 
   // Calculate filtered results
   const filteredDrivers = useMemo(() => {
@@ -139,11 +134,6 @@ export default function DriversPage() {
   }, [filteredDrivers, currentPage]);
 
   const totalPages = Math.ceil(filteredDrivers.length / itemsPerPage);
-
-  // Get route name by driver ID
-  const getAssignedRoute = (driverId: string) => {
-    return routes.find((r) => r.assignedDriverId === driverId);
-  };
 
   // Handle approve driver
   const handleApproveDriver = async (driver: User) => {
@@ -217,6 +207,34 @@ export default function DriversPage() {
 
   const handleShowImage = (imageUrl: string) => {
     setImageModal({ open: true, url: imageUrl });
+  };
+
+  const handleAssignRouteClick = (driver: User) => {
+    setDriverForRouteAssign(driver);
+
+    const currentRoute =
+      routes.find((r) => r.assignedDriverId === driver.uid) ||
+      (driver.routeId
+        ? routes.find((r) => r.routeId === driver.routeId)
+        : null);
+
+    if (routes.length === 0) {
+      toast.error("No routes available for assignment");
+      return;
+    }
+
+    setSelectedRouteId(currentRoute?.routeId || routes[0].routeId);
+    setRoutePickerOpen(true);
+  };
+
+  const handleOpenAssignModalFromPicker = () => {
+    const selectedRoute = routes.find((r) => r.routeId === selectedRouteId);
+    if (!selectedRoute) {
+      toast.error("Please select a route first");
+      return;
+    }
+    setRoutePickerOpen(false);
+    setAssignModalRoute(selectedRoute);
   };
 
   const renderTabContent = () => {
@@ -329,6 +347,7 @@ export default function DriversPage() {
                   drivers={paginatedDrivers}
                   routes={routes}
                   onViewDriver={handleViewDriver}
+                  onAssignRoute={handleAssignRouteClick}
                   onSuspend={(driver) => {
                     setConfirmDialog({
                       open: true,
@@ -635,13 +654,68 @@ export default function DriversPage() {
         title="Profile Photo"
       >
         <div className="flex justify-center">
-          <img
+          <Image
             src={imageModal.url}
             alt="Driver profile"
+            width={800}
+            height={800}
+            unoptimized
             className="max-w-full h-auto max-h-96 rounded-lg"
           />
         </div>
       </Modal>
+
+      <Modal
+        open={routePickerOpen}
+        onClose={() => setRoutePickerOpen(false)}
+        title={`Assign Route to ${driverForRouteAssign?.fullName || "Driver"}`}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Select a route, then continue to assign or change this driver using
+            the route assignment modal.
+          </p>
+          <select
+            value={selectedRouteId}
+            onChange={(event) => setSelectedRouteId(event.target.value)}
+            className="w-full rounded-lg border border-slate-200 px-4 py-2 text-sm outline-none focus:border-blue-500"
+          >
+            {routes.map((route) => (
+              <option key={route.routeId} value={route.routeId}>
+                {route.routeName}
+              </option>
+            ))}
+          </select>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setRoutePickerOpen(false)}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenAssignModalFromPicker}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {assignModalRoute && driverForRouteAssign && (
+        <AssignDriverModal
+          open={!!assignModalRoute}
+          onClose={() => {
+            setAssignModalRoute(null);
+            setDriverForRouteAssign(null);
+          }}
+          route={assignModalRoute}
+          initialDriverId={driverForRouteAssign.uid}
+        />
+      )}
     </section>
   );
 }
@@ -656,7 +730,8 @@ function RejectDialog({
 }: {
   open: boolean;
   driver: User;
-  onConfirm: (reason: string) => void;
+  // eslint-disable-next-line no-unused-vars
+  onConfirm: (...args: [string]) => void;
   onCancel: () => void;
   isLoading?: boolean;
 }) {

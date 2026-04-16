@@ -3,10 +3,12 @@ import {
   query,
   where,
   getDocs,
+  getDoc,
   doc,
   updateDoc,
   setDoc,
   deleteDoc,
+  writeBatch,
   serverTimestamp,
   arrayUnion,
   arrayRemove,
@@ -102,6 +104,48 @@ export const removeDriverFromRoute = async (
   await updateDoc(doc(db, COLLECTIONS.USERS, driverId), {
     routeId: "",
   });
+};
+
+// Delete route — clears assignments from drivers/students and removes the route document
+export const deleteRoute = async (routeId: string): Promise<void> => {
+  const routeRef = doc(db, COLLECTIONS.ROUTES, routeId);
+  const routeSnap = await getDoc(routeRef);
+
+  if (!routeSnap.exists()) {
+    return;
+  }
+
+  const usersSnap = await getDocs(
+    query(collection(db, COLLECTIONS.USERS), where("routeId", "==", routeId)),
+  );
+
+  const batch = writeBatch(db);
+
+  usersSnap.docs
+    .filter(
+      (userDoc) => (userDoc.data() as { role?: string }).role === "driver",
+    )
+    .forEach((driverDoc) => {
+      batch.update(doc(db, COLLECTIONS.USERS, driverDoc.id), {
+        routeId: "",
+      });
+    });
+
+  usersSnap.docs
+    .filter(
+      (studentDoc) =>
+        (studentDoc.data() as { role?: string }).role === "student",
+    )
+    .forEach((studentDoc) => {
+      batch.update(doc(db, COLLECTIONS.USERS, studentDoc.id), {
+        routeId: "",
+        pickupStop: "",
+      });
+    });
+
+  batch.delete(routeRef);
+
+  await batch.commit();
 };
 
 // ─── FEE PAYMENTS ────────────────────────────────────

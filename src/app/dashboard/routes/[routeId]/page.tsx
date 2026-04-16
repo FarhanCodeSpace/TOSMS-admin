@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import {
   collection,
@@ -10,132 +11,58 @@ import {
   doc,
   getDoc,
   onSnapshot,
-  updateDoc,
 } from "firebase/firestore";
 import { format } from "date-fns";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   MapPin,
-  Phone,
-  User,
   Clock,
   Users,
   Zap,
   ChevronLeft,
   Edit,
+  AlertTriangle,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
 import { Route, User as UserType, Availability } from "@/types";
+import { formatTimeTo12Hour } from "@/utils/formatters";
 import Badge from "@/components/ui/Badge";
-import Modal from "@/components/ui/Modal";
-import AssignDriverModal from "./AssignDriverModal";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import AssignDriverModal from "@/components/routes/AssignDriverModal";
+import { deleteRoute } from "@/utils/firestoreHelpers";
 
-// Dynamic map component
-const RouteMap = ({
-  stops,
-}: {
-  stops: Array<{
-    stopName: string;
-    order: number;
-    coordinates: { latitude: number; longitude: number };
-  }>;
-}) => {
-  useEffect(() => {
-    let mapInstance: any = null;
-
-    const loadMap = async () => {
-      // Dynamically import leaflet only on client
-      const L = (await import("leaflet")).default;
-      await import("leaflet/dist/leaflet.css");
-
-      const mapContainer = document.getElementById("map") as HTMLElement;
-      if (!mapContainer) return;
-
-      // Remove existing map completely before creating new one
-      if ((mapContainer as any)._leaflet_map) {
-        (mapContainer as any)._leaflet_map.remove();
-      }
-
-      // Clear all leaflet properties
-      Object.keys(mapContainer).forEach((key) => {
-        if (key.startsWith("_leaflet")) {
-          delete (mapContainer as any)[key];
-        }
-      });
-      mapContainer.innerHTML = "";
-
-      mapInstance = L.map(mapContainer).setView(
-        [
-          stops[0]?.coordinates.latitude || 33.6844,
-          stops[0]?.coordinates.longitude || 73.0479,
-        ],
-        13,
-      );
-
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap contributors",
-        maxZoom: 19,
-      }).addTo(mapInstance);
-
-      const coordinates = stops.map(
-        (s) =>
-          [s.coordinates.latitude, s.coordinates.longitude] as [number, number],
-      );
-
-      // Add markers
-      stops.forEach((stop) => {
-        L.marker([stop.coordinates.latitude, stop.coordinates.longitude])
-          .bindPopup(
-            `<div class="p-2"><strong>${stop.order}. ${stop.stopName}</strong><br/>${stop.coordinates.latitude.toFixed(4)}, ${stop.coordinates.longitude.toFixed(4)}</div>`,
-          )
-          .addTo(mapInstance);
-      });
-
-      // Draw polyline
-      if (coordinates.length > 1) {
-        L.polyline(coordinates, {
-          color: "blue",
-          weight: 2,
-          opacity: 0.7,
-        }).addTo(mapInstance);
-      }
-
-      // Fit bounds
-      if (coordinates.length > 0) {
-        const bounds = L.latLngBounds(coordinates);
-        mapInstance.fitBounds(bounds, { padding: [50, 50] });
-      }
-    };
-
-    loadMap().catch((err) => console.error("Map error:", err));
-
-    return () => {
-      if (mapInstance) {
-        mapInstance.remove();
-      }
-    };
-  }, [stops]);
-
-  return <div id="map" className="w-full h-96 rounded-lg" />;
-};
+const RouteDetailMap = dynamic(
+  () => import("@/components/routes/RouteDetailMap"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-64 bg-gray-100 rounded-xl animate-pulse flex items-center justify-center">
+        <span className="text-gray-400">Loading map...</span>
+      </div>
+    ),
+  },
+);
 
 export default function RouteDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const routeId = params?.routeId as string;
 
   const [route, setRoute] = useState<Route | null>(null);
   const [driver, setDriver] = useState<UserType | null>(null);
   const [students, setStudents] = useState<UserType[]>([]);
-  const [drivers, setDrivers] = useState<UserType[]>([]);
   const [todayAvailability, setTodayAvailability] = useState<Availability[]>(
     [],
   );
   const [isLoading, setIsLoading] = useState(true);
 
   const [assignDriverModalOpen, setAssignDriverModalOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Fetch route
   useEffect(() => {
@@ -161,7 +88,11 @@ export default function RouteDetailPage() {
                 ...driverSnap.data(),
                 uid: driverSnap.id,
               } as UserType);
+            } else {
+              setDriver(null);
             }
+          } else {
+            setDriver(null);
           }
 
           // Fetch assigned students
@@ -184,21 +115,6 @@ export default function RouteDetailPage() {
 
     return () => unsubscribe();
   }, [routeId]);
-
-  // Fetch all drivers
-  useEffect(() => {
-    const unsubscribe = onSnapshot(
-      query(collection(db, COLLECTIONS.USERS), where("role", "==", "driver")),
-      (snapshot) => {
-        const driversList = snapshot.docs.map((d) => ({
-          ...d.data(),
-          uid: d.id,
-        })) as UserType[];
-        setDrivers(driversList);
-      },
-    );
-    return () => unsubscribe();
-  }, []);
 
   // Fetch today's availability
   useEffect(() => {
@@ -235,6 +151,23 @@ export default function RouteDetailPage() {
 
     return { available, unavailable, notMarked };
   }, [todayAvailability, students]);
+
+  const handleDeleteRoute = async () => {
+    if (!route) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteRoute(route.routeId);
+      toast.success("Route deleted successfully");
+      router.push("/dashboard/routes");
+    } catch (error) {
+      console.error("Error deleting route:", error);
+      toast.error("Failed to delete route");
+    } finally {
+      setIsDeleting(false);
+      setDeleteConfirmOpen(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -293,7 +226,8 @@ export default function RouteDetailPage() {
             <span className="text-sm text-slate-600">Schedule</span>
           </div>
           <p className="text-lg font-semibold text-slate-900">
-            {route.departureTime} - {route.returnTime}
+            {formatTimeTo12Hour(route.departureTime)} -{" "}
+            {formatTimeTo12Hour(route.returnTime)}
           </p>
         </div>
 
@@ -331,7 +265,7 @@ export default function RouteDetailPage() {
       {/* Map */}
       <div className="rounded-lg border border-slate-200 bg-white p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Route Map</h2>
-        <RouteMap stops={route.stops || []} />
+        <RouteDetailMap stops={route.stops || []} />
       </div>
 
       {/* Driver Section */}
@@ -344,7 +278,7 @@ export default function RouteDetailPage() {
             onClick={() => setAssignDriverModalOpen(true)}
             className="px-3 py-1 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
           >
-            Change Driver
+            {route.assignedDriverId ? "Change Driver" : "Assign Driver"}
           </button>
         </div>
 
@@ -454,13 +388,58 @@ export default function RouteDetailPage() {
         )}
       </div>
 
+      {/* Danger Zone */}
+      <div className="rounded-2xl border border-rose-200 bg-rose-50/60 p-6">
+        <div className="flex items-start gap-3">
+          <div className="rounded-full bg-rose-100 p-2 text-rose-700">
+            <AlertTriangle size={18} />
+          </div>
+          <div className="flex-1">
+            <h2 className="text-lg font-semibold text-rose-900">Danger Zone</h2>
+            <p className="mt-1 text-sm text-rose-700">
+              Deleting this route will remove it from the system and clear it
+              from any assigned driver or students.
+            </p>
+            <div className="mt-4 rounded-xl border border-rose-200 bg-white p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Delete this route
+                  </p>
+                  <p className="text-sm text-slate-600">
+                    This action cannot be undone.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  className="inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+                >
+                  Delete Route
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Modals */}
       <AssignDriverModal
         open={assignDriverModalOpen}
         onClose={() => setAssignDriverModalOpen(false)}
         route={route}
-        drivers={drivers}
-        currentDriver={driver}
+        initialDriverId={route.assignedDriverId}
+      />
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title="Delete Route?"
+        message={`Delete ${route.routeName}? This will remove the route and clear it from any assigned driver or students.`}
+        confirmLabel="Delete"
+        destructive
+        isLoading={isDeleting}
+        onConfirm={handleDeleteRoute}
+        onCancel={() => setDeleteConfirmOpen(false)}
       />
     </div>
   );

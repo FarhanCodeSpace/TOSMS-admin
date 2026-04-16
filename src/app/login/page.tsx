@@ -51,7 +51,7 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-6">
+    <main className="flex min-h-screen items-center justify-center px-4 py-6">
       <section className="w-full max-w-md rounded-3xl border border-slate-200 bg-white/95 p-8 shadow-2xl shadow-slate-200">
         <div className="mb-8 text-center">
           <p className="text-4xl font-black text-[#1A3C5E]">TOSMS</p>

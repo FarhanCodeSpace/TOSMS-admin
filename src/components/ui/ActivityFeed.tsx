@@ -34,7 +34,7 @@ export default function ActivityFeed({
   emptyText = "No recent activity yet.",
 }: ActivityFeedProps) {
   return (
-    <div className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
+    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="mb-6 flex items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>

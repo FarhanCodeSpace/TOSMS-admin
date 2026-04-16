@@ -1,13 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  onSnapshot,
-} from "firebase/firestore";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { format } from "date-fns";
 import {
   Download,
@@ -27,7 +21,7 @@ import { User, Route, FeePayment } from "@/types";
 import Badge from "@/components/ui/Badge";
 import StatsCard from "@/components/ui/StatsCard";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
-import { formatTimestamp, getInitials, formatPKR } from "@/utils/formatters";
+import { getInitials } from "@/utils/formatters";
 import { removeStudentFromRoute } from "@/utils/firestoreHelpers";
 import StudentDetailModal from "./StudentDetailModal";
 import AssignStudentToRouteModal from "./AssignStudentToRouteModal";

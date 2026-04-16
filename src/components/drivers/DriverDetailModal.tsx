@@ -1,9 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import { User, Route } from "@/types";
-import { Star, Calendar, MapPin, Pause, Play } from "lucide-react";
+import { Calendar, MapPin, Pause, Play } from "lucide-react";
 import Modal from "@/components/ui/Modal";
 import Badge from "@/components/ui/Badge";
+import { formatTimeTo12Hour } from "@/utils/formatters";
 
 interface DriverDetailModalProps {
   open: boolean;
@@ -91,9 +93,12 @@ export default function DriverDetailModal({
         {/* Header Info */}
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center pb-6 border-b border-slate-200">
           {driver.profileImageUrl ? (
-            <img
+            <Image
               src={driver.profileImageUrl}
               alt={driver.fullName}
+              width={80}
+              height={80}
+              unoptimized
               className="h-20 w-20 rounded-full object-cover"
             />
           ) : (
@@ -177,8 +182,8 @@ export default function DriverDetailModal({
                 <Calendar className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
                 <div>
                   <p className="text-xs text-slate-600">
-                    Departure: {assignedRoute.departureTime} | Return:{" "}
-                    {assignedRoute.returnTime}
+                    Departure: {formatTimeTo12Hour(assignedRoute.departureTime)}{" "}
+                    | Return: {formatTimeTo12Hour(assignedRoute.returnTime)}
                   </p>
                 </div>
               </div>

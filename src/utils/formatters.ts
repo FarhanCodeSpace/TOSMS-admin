@@ -61,6 +61,22 @@ export const formatRole = (role: string): string => {
   return map[role] || role;
 };
 
+// Converts "HH:mm" to "h:mm AM/PM" while preserving already formatted values
+export function formatTimeTo12Hour(timeString: string): string {
+  if (!timeString) return "";
+  if (timeString.includes("AM") || timeString.includes("PM")) return timeString;
+
+  const [hourStr, minuteStr] = timeString.split(":");
+  let hour = parseInt(hourStr, 10);
+  const minute = minuteStr || "00";
+  const period = hour >= 12 ? "PM" : "AM";
+
+  if (hour > 12) hour -= 12;
+  if (hour === 0) hour = 12;
+
+  return `${hour}:${minute} ${period}`;
+}
+
 // Truncate long text
 export const truncate = (text: string, maxLength: number): string => {
   if (!text) return "";

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { User } from "@/types";
 import { Image as ImageIcon, CheckCircle, XCircle } from "lucide-react";
 
@@ -7,7 +8,8 @@ interface DriverCardProps {
   driver: User;
   onApprove: () => void;
   onReject: () => void;
-  onShowImage: (url: string) => void;
+  // eslint-disable-next-line no-unused-vars
+  onShowImage: (...args: [string]) => void;
 }
 
 function getInitials(name: string): string {
@@ -38,9 +40,12 @@ export default function DriverCard({
         <div className="flex gap-4">
           {driver.profileImageUrl ? (
             <div className="relative">
-              <img
+              <Image
                 src={driver.profileImageUrl}
                 alt={driver.fullName}
+                width={64}
+                height={64}
+                unoptimized
                 className="h-16 w-16 rounded-full object-cover"
               />
             </div>

@@ -1,14 +1,19 @@
 "use client";
 
+import Image from "next/image";
 import { User, Route } from "@/types";
-import { Eye, Pause, Play } from "lucide-react";
+import { Eye, Pause } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 
 interface DriverTableProps {
   drivers: User[];
   routes: Route[];
-  onViewDriver: (driver: User) => void;
-  onSuspend: (driver: User) => void;
+  // eslint-disable-next-line no-unused-vars
+  onViewDriver: (...args: [User]) => void;
+  // eslint-disable-next-line no-unused-vars
+  onSuspend: (...args: [User]) => void;
+  // eslint-disable-next-line no-unused-vars
+  onAssignRoute: (...args: [User]) => void;
 }
 
 function getVehicleIcon(vehicleType?: string): string {
@@ -34,6 +39,7 @@ export default function DriverTable({
   routes,
   onViewDriver,
   onSuspend,
+  onAssignRoute,
 }: DriverTableProps) {
   const getAssignedRouteName = (driverId: string): string => {
     const route = routes.find((r) => r.assignedDriverId === driverId);
@@ -80,85 +86,102 @@ export default function DriverTable({
           </tr>
         </thead>
         <tbody>
-          {drivers.map((driver) => (
-            <tr
-              key={driver.uid}
-              className="border-b border-slate-200 hover:bg-slate-50 transition"
-            >
-              <td className="px-4 py-3">
-                <div className="flex items-center gap-3">
-                  {driver.profileImageUrl ? (
-                    <img
-                      src={driver.profileImageUrl}
-                      alt={driver.fullName}
-                      className="h-8 w-8 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-semibold">
-                      {getInitials(driver.fullName)}
-                    </div>
-                  )}
-                  <span className="text-sm font-medium text-slate-900">
-                    {driver.fullName}
+          {drivers.map((driver) => {
+            const assignedRouteName = getAssignedRouteName(driver.uid);
+            const hasRoute = assignedRouteName !== "Unassigned";
+
+            return (
+              <tr
+                key={driver.uid}
+                className="border-b border-slate-200 hover:bg-slate-50 transition"
+              >
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    {driver.profileImageUrl ? (
+                      <Image
+                        src={driver.profileImageUrl}
+                        alt={driver.fullName}
+                        width={32}
+                        height={32}
+                        unoptimized
+                        className="h-8 w-8 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-semibold">
+                        {getInitials(driver.fullName)}
+                      </div>
+                    )}
+                    <span className="text-sm font-medium text-slate-900">
+                      {driver.fullName}
+                    </span>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-sm text-slate-600">
+                  {driver.email}
+                </td>
+                <td className="px-4 py-3 text-sm text-slate-600">
+                  {driver.phone}
+                </td>
+                <td className="px-4 py-3 text-sm text-slate-900">
+                  <span className="mr-2">
+                    {getVehicleIcon(driver.vehicleType)}
                   </span>
-                </div>
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-600">
-                {driver.email}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-600">
-                {driver.phone}
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-900">
-                <span className="mr-2">
-                  {getVehicleIcon(driver.vehicleType)}
-                </span>
-                {driver.vehicleType
-                  ? driver.vehicleType.charAt(0).toUpperCase() +
-                    driver.vehicleType.slice(1)
-                  : "N/A"}{" "}
-                ({driver.vehiclePlate || "N/A"})
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-600">
-                {driver.vehicleCapacity || "N/A"}
-              </td>
-              <td className="px-4 py-3 text-sm">
-                <span
-                  className={
-                    getAssignedRouteName(driver.uid) === "Unassigned"
-                      ? "text-slate-400"
-                      : "text-slate-900 font-medium"
-                  }
-                >
-                  {getAssignedRouteName(driver.uid)}
-                </span>
-              </td>
-              <td className="px-4 py-3 text-sm text-slate-900">
-                {getRatingStars(driver.rating)}
-              </td>
-              <td className="px-4 py-3">
-                <Badge status={driver.status} />
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => onViewDriver(driver)}
-                    className="inline-flex items-center justify-center p-1.5 rounded-lg text-slate-600 hover:bg-slate-200 transition"
-                    title="View details"
+                  {driver.vehicleType
+                    ? driver.vehicleType.charAt(0).toUpperCase() +
+                      driver.vehicleType.slice(1)
+                    : "N/A"}{" "}
+                  ({driver.vehiclePlate || "N/A"})
+                </td>
+                <td className="px-4 py-3 text-sm text-slate-600">
+                  {driver.vehicleCapacity || "N/A"}
+                </td>
+                <td className="px-4 py-3 text-sm">
+                  <span
+                    className={
+                      assignedRouteName === "Unassigned"
+                        ? "text-slate-400"
+                        : "text-slate-900 font-medium"
+                    }
                   >
-                    <Eye className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => onSuspend(driver)}
-                    className="inline-flex items-center justify-center p-1.5 rounded-lg text-amber-600 hover:bg-amber-100 transition"
-                    title="Suspend driver"
-                  >
-                    <Pause className="h-4 w-4" />
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
+                    {assignedRouteName}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-sm text-slate-900">
+                  {getRatingStars(driver.rating)}
+                </td>
+                <td className="px-4 py-3">
+                  <Badge status={driver.status} />
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => onAssignRoute(driver)}
+                      className="rounded-lg border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                      title={
+                        hasRoute ? "Change route assignment" : "Assign route"
+                      }
+                    >
+                      {hasRoute ? "Change Route" : "Assign Route"}
+                    </button>
+                    <button
+                      onClick={() => onViewDriver(driver)}
+                      className="inline-flex items-center justify-center p-1.5 rounded-lg text-slate-600 hover:bg-slate-200 transition"
+                      title="View details"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => onSuspend(driver)}
+                      className="inline-flex items-center justify-center p-1.5 rounded-lg text-amber-600 hover:bg-amber-100 transition"
+                      title="Suspend driver"
+                    >
+                      <Pause className="h-4 w-4" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

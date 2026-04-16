@@ -2,7 +2,7 @@
 export const COLORS = {
   primary: "#1A3C5E",
   accent: "#F5A623",
-  background: "#F8F9FA",
+  background: "#F4EFE6",
   surface: "#FFFFFF",
   error: "#F44336",
   success: "#4CAF50",

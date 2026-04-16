@@ -1,19 +1,47 @@
 "use client";
 
-import { useState } from "react";
+import { DragEvent, useState } from "react";
+import dynamic from "next/dynamic";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { Plus, Trash2, GripVertical } from "lucide-react";
+import { Plus, Trash2, GripVertical, MapPin } from "lucide-react";
 import toast from "react-hot-toast";
 import Modal from "@/components/ui/Modal";
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
 
+const StopLocationPickerModal = dynamic(
+  () => import("@/components/routes/StopLocationPickerModal"),
+  { ssr: false },
+);
+
+const StopLocationPreviewMap = dynamic(
+  () => import("@/components/routes/StopLocationPreviewMap"),
+  { ssr: false },
+);
+
 type Stop = {
+  id: string;
   stopName: string;
   order: number;
   latitude: string;
   longitude: string;
 };
+
+type Coordinates = {
+  latitude: number;
+  longitude: number;
+};
+
+const createStop = (order: number): Stop => ({
+  id:
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${order}-${Math.random().toString(36).slice(2)}`,
+  stopName: "",
+  order,
+  latitude: "",
+  longitude: "",
+});
 
 type CreateRouteModalProps = {
   open: boolean;
@@ -36,20 +64,13 @@ export default function CreateRouteModal({
   const [isActive, setIsActive] = useState(true);
 
   // Step 2: Stops
-  const [stops, setStops] = useState<Stop[]>([
-    { stopName: "", order: 1, latitude: "", longitude: "" },
-    { stopName: "", order: 2, latitude: "", longitude: "" },
-  ]);
+  const [stops, setStops] = useState<Stop[]>([createStop(1), createStop(2)]);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerStopIndex, setPickerStopIndex] = useState<number | null>(null);
 
   const handleAddStop = () => {
-    const newStop: Stop = {
-      stopName: "",
-      order: stops.length + 1,
-      latitude: "",
-      longitude: "",
-    };
-    setStops([...stops, newStop]);
+    setStops([...stops, createStop(stops.length + 1)]);
   };
 
   const handleRemoveStop = (index: number) => {
@@ -75,7 +96,7 @@ export default function CreateRouteModal({
     setDraggedIndex(index);
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
   };
 
@@ -87,6 +108,23 @@ export default function CreateRouteModal({
     newStops.splice(targetIndex, 0, draggedStop);
     setStops(newStops.map((s, i) => ({ ...s, order: i + 1 })));
     setDraggedIndex(null);
+  };
+
+  const openStopPicker = (index: number) => {
+    setPickerStopIndex(index);
+    setPickerOpen(true);
+  };
+
+  const handleStopLocationConfirm = (location: Coordinates) => {
+    if (pickerStopIndex === null) return;
+
+    const nextStops = [...stops];
+    nextStops[pickerStopIndex] = {
+      ...nextStops[pickerStopIndex],
+      latitude: location.latitude.toFixed(6),
+      longitude: location.longitude.toFixed(6),
+    };
+    setStops(nextStops);
   };
 
   const handleSubmit = async () => {
@@ -110,6 +148,7 @@ export default function CreateRouteModal({
     try {
       await addDoc(collection(db, COLLECTIONS.ROUTES), {
         routeName,
+        name: routeName,
         description,
         departureTime,
         returnTime,
@@ -139,10 +178,7 @@ export default function CreateRouteModal({
       setReturnTime("");
       setMonthlyFee("");
       setIsActive(true);
-      setStops([
-        { stopName: "", order: 1, latitude: "", longitude: "" },
-        { stopName: "", order: 2, latitude: "", longitude: "" },
-      ]);
+      setStops([createStop(1), createStop(2)]);
     } catch (error) {
       console.error("Error creating route:", error);
       toast.error("Failed to create route");
@@ -159,10 +195,7 @@ export default function CreateRouteModal({
     setReturnTime("");
     setMonthlyFee("");
     setIsActive(true);
-    setStops([
-      { stopName: "", order: 1, latitude: "", longitude: "" },
-      { stopName: "", order: 2, latitude: "", longitude: "" },
-    ]);
+    setStops([createStop(1), createStop(2)]);
     onClose();
   };
 
@@ -259,7 +292,7 @@ export default function CreateRouteModal({
             <div className="space-y-3 max-h-80 overflow-y-auto">
               {stops.map((stop, index) => (
                 <div
-                  key={index}
+                  key={stop.id}
                   draggable
                   onDragStart={() => handleDragStart(index)}
                   onDragOver={handleDragOver}
@@ -313,6 +346,28 @@ export default function CreateRouteModal({
                         className="px-3 py-2 border border-slate-200 rounded text-sm outline-none focus:border-blue-500"
                       />
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => openStopPicker(index)}
+                      className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-slate-50"
+                    >
+                      <MapPin size={14} />
+                      Pick on Map
+                    </button>
+
+                    {stop.latitude && stop.longitude && (
+                      <div className="space-y-1">
+                        <StopLocationPreviewMap
+                          key={`${stop.id}-${stop.latitude}-${stop.longitude}`}
+                          latitude={parseFloat(stop.latitude)}
+                          longitude={parseFloat(stop.longitude)}
+                        />
+                        <p className="text-xs text-slate-500">
+                          Latitude: {stop.latitude}, Longitude: {stop.longitude}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -320,7 +375,7 @@ export default function CreateRouteModal({
 
             <button
               onClick={handleAddStop}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 transition"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition"
             >
               <Plus size={18} />
               Add Stop
@@ -367,6 +422,25 @@ export default function CreateRouteModal({
           )}
         </div>
       </div>
+
+      <StopLocationPickerModal
+        open={pickerOpen}
+        onClose={() => {
+          setPickerOpen(false);
+          setPickerStopIndex(null);
+        }}
+        initialLocation={
+          pickerStopIndex !== null &&
+          stops[pickerStopIndex].latitude &&
+          stops[pickerStopIndex].longitude
+            ? {
+                latitude: parseFloat(stops[pickerStopIndex].latitude),
+                longitude: parseFloat(stops[pickerStopIndex].longitude),
+              }
+            : undefined
+        }
+        onConfirm={handleStopLocationConfirm}
+      />
     </Modal>
   );
 }

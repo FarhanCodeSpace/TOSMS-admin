@@ -2,11 +2,9 @@
 
 import { useMemo } from "react";
 import { format, subMonths } from "date-fns";
-import { X } from "lucide-react";
 import Modal from "@/components/ui/Modal";
-import Badge from "@/components/ui/Badge";
 import { User, Route, FeePayment } from "@/types";
-import { formatPKR, getInitials } from "@/utils/formatters";
+import { getInitials, formatTimeTo12Hour } from "@/utils/formatters";
 
 type StudentDetailModalProps = {
   open: boolean;
@@ -158,7 +156,9 @@ export default function StudentDetailModal({
                 <p className="text-sm font-medium text-slate-600">
                   Departure Time
                 </p>
-                <p className="text-slate-900">{assignedRoute.departureTime}</p>
+                <p className="text-slate-900">
+                  {formatTimeTo12Hour(assignedRoute.departureTime)}
+                </p>
               </div>
               <button className="w-full mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">
                 Change Route
