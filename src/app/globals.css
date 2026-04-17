@@ -24,3 +24,229 @@ textarea,
 select {
   font: inherit;
 }
+
+/* ─── PRINT STYLES ─────────────────────────────────────── */
+
+@media print {
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    color-adjust: exact;
+  }
+
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: white;
+  }
+
+  body {
+    background-color: white;
+    font-size: 11pt;
+    line-height: 1.5;
+  }
+
+  @page {
+    size: A4;
+    margin: 0.5in 0.5in 0.5in 0.5in;
+  }
+
+  /* Hide all interactive elements */
+  button,
+  [role="switch"],
+  .print\:hidden,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Show print content */
+  .print\:block {
+    display: block !important;
+  }
+
+  .print\:flex {
+    display: flex !important;
+  }
+
+  /* Optimize for printing */
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  tr {
+    page-break-inside: avoid;
+  }
+
+  /* Page breaks */
+  .print-break {
+    page-break-after: always;
+  }
+
+  .print-avoid-break {
+    page-break-inside: avoid;
+  }
+
+  /* Remove box shadows and unnecessary styling */
+  .shadow-sm,
+  .shadow,
+  .shadow-lg {
+    box-shadow: none !important;
+  }
+
+  /* Optimize colors for B&W printing */
+  body {
+    color: black;
+  }
+
+  .bg-slate-50,
+  .bg-slate-100,
+  .bg-emerald-50,
+  .bg-rose-50,
+  .bg-amber-50,
+  .bg-blue-50 {
+    background-color: #f9fafb !important;
+  }
+
+  .border-slate-200,
+  .border-slate-300 {
+    border-color: #d1d5db !important;
+  }
+
+  /* Ensure text is readable */
+  .text-slate-900,
+  .text-slate-800 {
+    color: black !important;
+  }
+
+  .text-slate-700,
+  .text-slate-600,
+  .text-slate-500 {
+    color: #374151 !important;
+  }
+
+  /* Preserve important colors */
+  .text-emerald-700,
+  .text-emerald-600 {
+    color: #059669 !important;
+  }
+
+  .text-rose-700,
+  .text-rose-600 {
+    color: #dc2626 !important;
+  }
+
+  .text-amber-700,
+  .text-amber-600 {
+    color: #d97706 !important;
+  }
+
+  .border-emerald-600 {
+    border-color: #059669 !important;
+  }
+
+  .border-rose-600 {
+    border-color: #dc2626 !important;
+  }
+
+  .border-amber-600 {
+    border-color: #d97706 !important;
+  }
+
+  .border-blue-600 {
+    border-color: #2563eb !important;
+  }
+
+  .bg-emerald-600,
+  .bg-slate-100 {
+    background-color: #f3f4f6 !important;
+  }
+
+  .bg-slate-100 {
+    background-color: #f3f4f6 !important;
+  }
+
+  /* Optimize for readability */
+  h1 {
+    font-size: 24pt;
+    margin-bottom: 12pt;
+    page-break-after: avoid;
+  }
+
+  h2 {
+    font-size: 18pt;
+    margin-bottom: 10pt;
+    margin-top: 12pt;
+    page-break-after: avoid;
+  }
+
+  h3 {
+    font-size: 14pt;
+    margin-bottom: 8pt;
+    margin-top: 10pt;
+    page-break-after: avoid;
+  }
+
+  h4 {
+    font-size: 12pt;
+    margin-bottom: 6pt;
+    page-break-after: avoid;
+  }
+
+  p {
+    margin: 0 0 6pt 0;
+    page-break-inside: avoid;
+  }
+
+  /* Table styles */
+  table {
+    font-size: 10pt;
+    margin-bottom: 12pt;
+  }
+
+  th {
+    background-color: #f3f4f6 !important;
+    color: black !important;
+    font-weight: bold;
+    text-align: left;
+    padding: 6pt;
+    border: 1px solid #d1d5db !important;
+  }
+
+  td {
+    padding: 6pt;
+    border: 1px solid #d1d5db !important;
+    text-align: left;
+  }
+
+  /* Print footer */
+  .print-footer {
+    margin-top: 20pt;
+    padding-top: 12pt;
+    border-top: 2px solid #1f2937;
+    text-align: center;
+    font-size: 9pt;
+    color: #6b7280;
+  }
+}
