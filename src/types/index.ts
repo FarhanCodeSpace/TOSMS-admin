@@ -89,6 +89,8 @@ export interface FeePayment {
   verifiedAt?: Timestamp;
   receiptImageUrl?: string;
   rejectionReason?: string;
+  feeExempt?: boolean;
+  exemptedAt?: Timestamp;
 }
 
 export interface Challan {
