@@ -27,7 +27,7 @@ const navItems = [
   { label: "Students", href: "/dashboard/students", icon: GraduationCap },
   { label: "Availability", href: "/dashboard/availability", icon: Calendar },
   { label: "Fees", href: "/dashboard/fees", icon: CreditCard },
-  { label: "Live Tracking", href: "/dashboard/live-tracking", icon: Map },
+  { label: "Live Tracking", href: "/dashboard/tracking", icon: Map },
   { label: "Rides", href: "/dashboard/rides", icon: Bus },
   { label: "Reviews", href: "/dashboard/reviews", icon: Star },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },

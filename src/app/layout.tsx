@@ -1,4 +1,5 @@
 import "./globals.css";
+import "leaflet/dist/leaflet.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { AuthProvider } from "@/context/AuthContext";
