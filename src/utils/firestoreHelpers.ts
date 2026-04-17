@@ -76,6 +76,76 @@ export const removeStudentFromRoute = async (
   });
 };
 
+// Delete student account and clean route/availability relationships.
+export const deleteStudentAccount = async (
+  studentId: string,
+): Promise<void> => {
+  const studentRef = doc(db, COLLECTIONS.USERS, studentId);
+  const studentSnap = await getDoc(studentRef);
+
+  if (!studentSnap.exists()) {
+    return;
+  }
+
+  const studentData = studentSnap.data() as { routeId?: string };
+  // Required path: always remove user and route link first.
+  // This must succeed even if optional collections (challans, fee history) are locked by rules.
+  const requiredBatch = writeBatch(db);
+  if (studentData.routeId) {
+    requiredBatch.update(doc(db, COLLECTIONS.ROUTES, studentData.routeId), {
+      studentIds: arrayRemove(studentId),
+    });
+  }
+
+  requiredBatch.delete(studentRef);
+  await requiredBatch.commit();
+
+  // Optional cleanup path: best-effort only.
+  const safeGetDocs = async (collectionName: string, field: string) => {
+    try {
+      return await getDocs(
+        query(collection(db, collectionName), where(field, "==", studentId)),
+      );
+    } catch (error) {
+      console.warn(`Skipping optional cleanup for ${collectionName}:`, error);
+      return null;
+    }
+  };
+
+  const [availabilitySnap, feePaymentsSnap, challansSnap] = await Promise.all([
+    safeGetDocs(COLLECTIONS.AVAILABILITY, "userId"),
+    safeGetDocs(COLLECTIONS.FEE_PAYMENTS, "studentId"),
+    safeGetDocs(COLLECTIONS.CHALLANS, "studentId"),
+  ]);
+
+  const deleteRefs = [
+    ...(availabilitySnap?.docs.map((docSnap) => docSnap.ref) || []),
+    ...(feePaymentsSnap?.docs.map((docSnap) => docSnap.ref) || []),
+    ...(challansSnap?.docs.map((docSnap) => docSnap.ref) || []),
+  ];
+
+  if (deleteRefs.length === 0) {
+    return;
+  }
+
+  const maxWritesPerBatch = 450;
+
+  for (let i = 0; i < deleteRefs.length; i += maxWritesPerBatch) {
+    const cleanupBatch = writeBatch(db);
+    const chunk = deleteRefs.slice(i, i + maxWritesPerBatch);
+
+    chunk.forEach((docRef) => {
+      cleanupBatch.delete(docRef);
+    });
+
+    try {
+      await cleanupBatch.commit();
+    } catch (error) {
+      console.warn("Optional student cleanup batch failed:", error);
+    }
+  }
+};
+
 // Assign driver to route — updates BOTH documents
 // Mobile app driver home MyRoute card updates instantly
 export const assignDriverToRoute = async (
@@ -104,6 +174,72 @@ export const removeDriverFromRoute = async (
   await updateDoc(doc(db, COLLECTIONS.USERS, driverId), {
     routeId: "",
   });
+};
+
+// Delete driver account and clear route/ride/live-location relationships.
+export const deleteDriverAccount = async (driverId: string): Promise<void> => {
+  const driverRef = doc(db, COLLECTIONS.USERS, driverId);
+  const driverSnap = await getDoc(driverRef);
+
+  if (!driverSnap.exists()) {
+    return;
+  }
+
+  const [routesSnap, ridesSnap, liveLocationsSnap, availabilitySnap] =
+    await Promise.all([
+      getDocs(
+        query(
+          collection(db, COLLECTIONS.ROUTES),
+          where("assignedDriverId", "==", driverId),
+        ),
+      ),
+      getDocs(
+        query(
+          collection(db, COLLECTIONS.RIDES),
+          where("assignedDriverId", "==", driverId),
+        ),
+      ),
+      getDocs(
+        query(
+          collection(db, COLLECTIONS.LIVE_LOCATIONS),
+          where("driverId", "==", driverId),
+        ),
+      ),
+      getDocs(
+        query(
+          collection(db, COLLECTIONS.AVAILABILITY),
+          where("userId", "==", driverId),
+        ),
+      ),
+    ]);
+
+  const batch = writeBatch(db);
+
+  routesSnap.docs.forEach((routeDoc) => {
+    batch.update(routeDoc.ref, {
+      assignedDriverId: "",
+      assignedDriverName: "",
+    });
+  });
+
+  ridesSnap.docs.forEach((rideDoc) => {
+    batch.update(rideDoc.ref, {
+      assignedDriverId: "",
+      driverName: "Unassigned Driver",
+    });
+  });
+
+  liveLocationsSnap.docs.forEach((liveLocationDoc) => {
+    batch.delete(liveLocationDoc.ref);
+  });
+
+  availabilitySnap.docs.forEach((availabilityDoc) => {
+    batch.delete(availabilityDoc.ref);
+  });
+
+  batch.delete(driverRef);
+
+  await batch.commit();
 };
 
 // Delete route — clears assignments from drivers/students and removes the route document

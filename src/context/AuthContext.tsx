@@ -43,6 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(true);
 
       try {
+        // Force token refresh to ensure fresh auth token for Firestore
+        await fbUser.getIdToken(true);
         const userDoc = await getDoc(doc(db, COLLECTIONS.USERS, fbUser.uid));
         const userData = userDoc.exists() ? (userDoc.data() as User) : null;
 

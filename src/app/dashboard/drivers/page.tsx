@@ -11,16 +11,19 @@ import {
   doc,
 } from "firebase/firestore";
 import { Users, AlertCircle, Search, Loader2 } from "lucide-react";
+import { Download } from "lucide-react";
 import toast from "react-hot-toast";
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
 import type { User, Route } from "@/types";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import Modal from "@/components/ui/Modal";
+import SkeletonLoader from "@/components/ui/SkeletonLoader";
 import DriverCard from "@/components/drivers/DriverCard";
 import DriverTable from "@/components/drivers/DriverTable";
 import DriverDetailModal from "@/components/drivers/DriverDetailModal";
 import AssignDriverModal from "@/components/routes/AssignDriverModal";
+import { deleteDriverAccount } from "@/utils/firestoreHelpers";
 
 type TabType = "all" | "pending" | "approved" | "suspended";
 
@@ -47,7 +50,7 @@ export default function DriversPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
-    type: "approve" | "reject" | "suspend" | "reactivate" | null;
+    type: "approve" | "reject" | "suspend" | "reactivate" | "delete" | null;
     driver: User | null;
     reason?: string;
   }>({
@@ -194,10 +197,73 @@ export default function DriversPage() {
     }
   };
 
-  const handleAddDriver = () => {
-    toast("Drivers register through the mobile app", {
-      icon: "📱",
+  const handleExportCSV = () => {
+    const normalizeCsvText = (value: unknown): string => {
+      if (value === null || value === undefined) return "";
+      // Keep leading characters (like tab prefix) so Excel text-forcing remains intact.
+      return String(value).replace(/\r?\n|\r/g, " ");
+    };
+
+    const forceExcelText = (value: unknown): string => {
+      const text = normalizeCsvText(value);
+      if (!text) return "";
+      // Prefix with tab so Excel keeps the original value (e.g. phone numbers).
+      return `\t${text}`;
+    };
+
+    const escapeCsvCell = (value: unknown): string => {
+      const safe = normalizeCsvText(value).replace(/"/g, '""');
+      return `"${safe}"`;
+    };
+
+    const routeNameByDriverId = new Map<string, string>();
+    routes.forEach((route) => {
+      if (route.assignedDriverId) {
+        routeNameByDriverId.set(route.assignedDriverId, route.routeName);
+      }
     });
+
+    const headers = [
+      "Name",
+      "Email",
+      "Phone",
+      "Vehicle Type",
+      "Vehicle Plate",
+      "Vehicle Capacity",
+      "Status",
+      "Assigned Route",
+    ];
+
+    const rows = allDrivers.map((driver) => [
+      normalizeCsvText(driver.fullName),
+      normalizeCsvText(driver.email),
+      forceExcelText(driver.phone),
+      normalizeCsvText(driver.vehicleType),
+      normalizeCsvText(driver.vehiclePlate),
+      forceExcelText(driver.vehicleCapacity),
+      normalizeCsvText(driver.status),
+      normalizeCsvText(routeNameByDriverId.get(driver.uid) || "Unassigned"),
+    ]);
+
+    const csv = [
+      headers.map((header) => escapeCsvCell(header)).join(","),
+      ...rows.map((row) => row.map((cell) => escapeCsvCell(cell)).join(",")),
+    ].join("\n");
+
+    const csvWithBom = `\uFEFF${csv}`;
+    const blob = new Blob([csvWithBom], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute(
+      "download",
+      `drivers-${new Date().toISOString().slice(0, 10)}.csv`,
+    );
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("CSV exported successfully");
   };
 
   const handleViewDriver = (driver: User) => {
@@ -207,6 +273,22 @@ export default function DriversPage() {
 
   const handleShowImage = (imageUrl: string) => {
     setImageModal({ open: true, url: imageUrl });
+  };
+
+  const handleDeleteDriver = async (driver: User) => {
+    try {
+      setActionLoading(true);
+      await deleteDriverAccount(driver.uid);
+      toast.success("Driver deleted successfully");
+      setConfirmDialog({ open: false, type: null, driver: null });
+      setDetailModalOpen(false);
+      setSelectedDriver(null);
+    } catch (error) {
+      console.error("Error deleting driver:", error);
+      toast.error("Failed to delete driver");
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const handleAssignRouteClick = (driver: User) => {
@@ -240,8 +322,12 @@ export default function DriversPage() {
   const renderTabContent = () => {
     if (loading) {
       return (
-        <div className="flex justify-center py-12">
-          <div className="text-slate-600">Loading drivers...</div>
+        <div className="space-y-4 py-2">
+          <div className="grid gap-4 md:grid-cols-2">
+            <SkeletonLoader variant="card" />
+            <SkeletonLoader variant="card" />
+          </div>
+          <SkeletonLoader variant="table" rows={6} />
         </div>
       );
     }
@@ -289,6 +375,13 @@ export default function DriversPage() {
                       setConfirmDialog({
                         open: true,
                         type: "reject",
+                        driver,
+                      });
+                    }}
+                    onDelete={() => {
+                      setConfirmDialog({
+                        open: true,
+                        type: "delete",
                         driver,
                       });
                     }}
@@ -352,6 +445,13 @@ export default function DriversPage() {
                     setConfirmDialog({
                       open: true,
                       type: "suspend",
+                      driver,
+                    });
+                  }}
+                  onDelete={(driver) => {
+                    setConfirmDialog({
+                      open: true,
+                      type: "delete",
                       driver,
                     });
                   }}
@@ -452,18 +552,32 @@ export default function DriversPage() {
                           {driver.vehicleType} ({driver.vehiclePlate})
                         </td>
                         <td className="px-4 py-3 text-sm">
-                          <button
-                            onClick={() => {
-                              setConfirmDialog({
-                                open: true,
-                                type: "reactivate",
-                                driver,
-                              });
-                            }}
-                            className="text-emerald-600 hover:text-emerald-700 font-medium"
-                          >
-                            Reactivate
-                          </button>
+                          <div className="flex items-center gap-4">
+                            <button
+                              onClick={() => {
+                                setConfirmDialog({
+                                  open: true,
+                                  type: "reactivate",
+                                  driver,
+                                });
+                              }}
+                              className="text-emerald-600 hover:text-emerald-700 font-medium"
+                            >
+                              Reactivate
+                            </button>
+                            <button
+                              onClick={() => {
+                                setConfirmDialog({
+                                  open: true,
+                                  type: "delete",
+                                  driver,
+                                });
+                              }}
+                              className="text-rose-600 hover:text-rose-700 font-medium"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -492,10 +606,11 @@ export default function DriversPage() {
           </p>
         </div>
         <button
-          onClick={handleAddDriver}
+          onClick={handleExportCSV}
           className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition"
         >
-          + Add Driver
+          <Download size={18} />
+          Export CSV
         </button>
       </div>
 
@@ -625,6 +740,23 @@ export default function DriversPage() {
         />
       )}
 
+      {confirmDialog.type === "delete" && confirmDialog.driver && (
+        <ConfirmDialog
+          open={confirmDialog.open}
+          title="Delete Driver?"
+          message={`Delete ${confirmDialog.driver.fullName}? This will remove their account and clear assigned route/ride references.`}
+          confirmLabel="Delete"
+          destructive
+          isLoading={actionLoading}
+          onConfirm={() => {
+            handleDeleteDriver(confirmDialog.driver as User);
+          }}
+          onCancel={() =>
+            setConfirmDialog({ open: false, type: null, driver: null })
+          }
+        />
+      )}
+
       {/* Detail Modal */}
       {selectedDriver && (
         <DriverDetailModal
@@ -641,6 +773,14 @@ export default function DriversPage() {
               open: true,
               type:
                 selectedDriver.status === "active" ? "suspend" : "reactivate",
+              driver: selectedDriver,
+            });
+          }}
+          onDelete={() => {
+            setDetailModalOpen(false);
+            setConfirmDialog({
+              open: true,
+              type: "delete",
               driver: selectedDriver,
             });
           }}

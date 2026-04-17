@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { User, Route } from "@/types";
-import { Calendar, MapPin, Pause, Play } from "lucide-react";
+import { Calendar, MapPin, Pause, Play, Trash2 } from "lucide-react";
 import Modal from "@/components/ui/Modal";
 import Badge from "@/components/ui/Badge";
 import { formatTimeTo12Hour } from "@/utils/formatters";
@@ -13,6 +13,7 @@ interface DriverDetailModalProps {
   routes: Route[];
   onClose: () => void;
   onSuspend: () => void;
+  onDelete: () => void;
 }
 
 function getInitials(name: string): string {
@@ -49,6 +50,7 @@ export default function DriverDetailModal({
   routes,
   onClose,
   onSuspend,
+  onDelete,
 }: DriverDetailModalProps) {
   const assignedRoute = getAssignedRoute(driver.uid, routes);
   const isActive = driver.status === "active";
@@ -60,6 +62,13 @@ export default function DriverDetailModal({
       title="Driver Details"
       footer={
         <div className="flex gap-2">
+          <button
+            onClick={onDelete}
+            className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 inline-flex items-center gap-2"
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete Driver
+          </button>
           <button
             onClick={onClose}
             className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"

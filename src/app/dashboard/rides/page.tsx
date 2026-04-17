@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   collection,
   doc,
@@ -240,6 +241,7 @@ function RideDetailModal({
 }
 
 export default function RidesPage() {
+  const searchParams = useSearchParams();
   const todayString = getTodayString();
 
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -274,6 +276,15 @@ export default function RidesPage() {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isMarkingCompleted, setIsMarkingCompleted] = useState(false);
   const [isCreatingTodayAll, setIsCreatingTodayAll] = useState(false);
+
+  useEffect(() => {
+    const shouldOpenCreate =
+      searchParams.get("create") === "1" ||
+      searchParams.get("create") === "true";
+    if (shouldOpenCreate) {
+      setCreateModalOpen(true);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(

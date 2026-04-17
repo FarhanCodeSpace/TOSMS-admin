@@ -27,6 +27,8 @@ export default function LoginPage() {
         password,
       );
       const userId = credential.user.uid;
+      // Force token refresh to ensure fresh auth token
+      await credential.user.getIdToken(true);
       const userDoc = await getDoc(doc(db, COLLECTIONS.USERS, userId));
       const userData = userDoc.data();
 
@@ -39,7 +41,7 @@ export default function LoginPage() {
       }
 
       document.cookie =
-        "tosms_admin_auth=true; path=/; max-age=3600; sameSite=strict";
+        "tosms_admin_auth=true; path=/; max-age=86400; SameSite=Strict";
       toast.success("Welcome to TOSMS Admin");
       router.push("/dashboard");
     } catch (signInError) {

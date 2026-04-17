@@ -6,7 +6,6 @@ import {
   onSnapshot,
   query,
   where,
-  getDocs,
   setDoc,
   serverTimestamp,
   updateDoc,
@@ -29,6 +28,14 @@ import {
   formatTimestamp,
   formatPaymentMethod,
 } from "@/utils/formatters";
+import {
+  getRecentMonthKeys,
+  isSettledForMonth,
+  isSubmittedForReview,
+  isVerifiedPayment,
+  normalizeFeeAmount,
+  normalizeFeeStatus,
+} from "@/utils/feeHelpers";
 import { getCurrentMonthString, formatMonthDisplay } from "@/utils/dateHelpers";
 import StatsCard from "@/components/ui/StatsCard";
 import PaymentCard from "@/components/fees/PaymentCard";
@@ -46,11 +53,48 @@ type RevenueSummary = {
   outstanding: number;
 };
 
+type NormalizedFeePayment = FeePayment & {
+  fareAmount?: number;
+};
+
+function normalizeFeePaymentRecord(
+  raw: Partial<FeePayment> & { fareAmount?: number },
+  paymentId: string,
+  fallbackMonth: string,
+): NormalizedFeePayment {
+  return {
+    ...raw,
+    paymentId,
+    studentId: raw.studentId ?? "",
+    studentName: raw.studentName ?? "Unknown Student",
+    routeId: raw.routeId ?? "",
+    month: raw.month ?? fallbackMonth,
+    amount: normalizeFeeAmount(raw),
+    paymentMethod: (raw.paymentMethod ??
+      "bank_challan") as FeePayment["paymentMethod"],
+    paymentStatus: normalizeFeeStatus(raw.paymentStatus),
+    submittedAt: raw.submittedAt as FeePayment["submittedAt"],
+    verifiedAt: raw.verifiedAt,
+    feeExempt: raw.feeExempt === true,
+    exemptedAt: raw.exemptedAt,
+    receiptImageUrl: raw.receiptImageUrl,
+    rejectionReason: raw.rejectionReason,
+    challanNumber: raw.challanNumber,
+    transactionId: raw.transactionId,
+    fareAmount: raw.fareAmount,
+  };
+}
+
 export default function FeesPage() {
   const [activeTab, setActiveTab] = useState<TabType>("pending");
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthString());
-  const [allPayments, setAllPayments] = useState<FeePayment[]>([]);
-  const [pendingPayments, setPendingPayments] = useState<FeePayment[]>([]);
+  const [allPayments, setAllPayments] = useState<NormalizedFeePayment[]>([]);
+  const [allPaymentsHistory, setAllPaymentsHistory] = useState<
+    NormalizedFeePayment[]
+  >([]);
+  const [pendingPayments, setPendingPayments] = useState<
+    NormalizedFeePayment[]
+  >([]);
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,6 +127,7 @@ export default function FeesPage() {
 
   // Revenue chart data
   const [revenueData, setRevenueData] = useState<RevenueSummary[]>([]);
+  const [revenueLoading, setRevenueLoading] = useState(true);
 
   // Modal states
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
@@ -128,119 +173,169 @@ export default function FeesPage() {
       ),
       (snapshot) => {
         const payments = snapshot.docs
-          .map((doc) => ({ ...doc.data(), paymentId: doc.id }) as FeePayment)
+          .map((doc) =>
+            normalizeFeePaymentRecord(
+              doc.data() as Partial<FeePayment> & { fareAmount?: number },
+              doc.id,
+              selectedMonth,
+            ),
+          )
           .sort(
             (a, b) =>
               (b.submittedAt?.toMillis?.() ?? 0) -
               (a.submittedAt?.toMillis?.() ?? 0),
           );
         setAllPayments(payments);
-
-        // Calculate summary stats
-        const submitted = payments.filter(
-          (p) => p.paymentStatus === "submitted",
-        );
-        const verified = payments.filter((p) => p.paymentStatus === "verified");
-        const collected = verified.reduce((sum, p) => sum + p.amount, 0);
-
-        setPendingPayments(submitted);
-        setPendingCount(submitted.length);
-        setVerifiedCount(verified.length);
-        setTotalCollected(collected);
-
-        // Calculate outstanding
-        const studentsWithPayments = new Set(
-          payments
-            .filter(
-              (p) =>
-                p.feeExempt === true ||
-                p.paymentStatus === "verified" ||
-                p.paymentStatus === "submitted",
-            )
-            .map((p) => p.studentId),
-        );
-        const outstandingStudentCount =
-          allStudents.length - studentsWithPayments.size;
-        setOutstandingCount(outstandingStudentCount);
-
         setLoading(false);
       },
     );
     return () => unsubscribe();
-  }, [selectedMonth, allStudents.length]);
+  }, [selectedMonth]);
 
-  // Calculate outstanding fees students
+  // Fetch full payments history for multi-month chart
   useEffect(() => {
-    const outstanding = allStudents.map((student) => {
-      const payment = allPayments.find((p) => p.studentId === student.uid);
-      const route = routes.find((r) => r.routeId === student.routeId);
-      const monthStart = new Date(`${selectedMonth}-01`);
-      const daysSinceStart = Math.floor(
-        (new Date().getTime() - monthStart.getTime()) / (1000 * 60 * 60 * 24),
-      );
+    setRevenueLoading(true);
 
-      return {
-        ...student,
-        monthlyFeeAmount: route?.feeAmount || 0,
-        daysSinceStart,
-      };
-    });
-
-    const filtered = outstanding.filter(
-      (s) =>
-        !allPayments.find(
-          (p) =>
-            p.studentId === s.uid &&
-            (p.feeExempt === true ||
-              p.paymentStatus === "verified" ||
-              p.paymentStatus === "submitted"),
-        ),
-    );
-
-    setOutstandingStudents(filtered);
-  }, [allStudents, allPayments, routes, selectedMonth]);
-
-  // Fetch revenue data for last 6 months
-  useEffect(() => {
-    const fetchRevenueData = async () => {
-      const data: RevenueSummary[] = [];
-      const currentDate = new Date();
-
-      for (let i = 5; i >= 0; i--) {
-        const monthDate = subMonths(currentDate, i);
-        const monthStr = format(monthDate, "yyyy-MM");
-
-        const paymentsSnapshot = await getDocs(
-          query(
-            collection(db, COLLECTIONS.FEE_PAYMENTS),
-            where("month", "==", monthStr),
+    const unsubscribe = onSnapshot(
+      collection(db, COLLECTIONS.FEE_PAYMENTS),
+      (snapshot) => {
+        const history = snapshot.docs.map((doc) =>
+          normalizeFeePaymentRecord(
+            doc.data() as Partial<FeePayment> & { fareAmount?: number },
+            doc.id,
+            getCurrentMonthString(),
           ),
         );
 
-        const payments = paymentsSnapshot.docs.map(
-          (doc) => doc.data() as FeePayment,
+        setAllPaymentsHistory(history);
+        setRevenueLoading(false);
+      },
+      () => {
+        setRevenueLoading(false);
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const studentFeeMap = useMemo(() => {
+    const routeMap = new Map(
+      routes.map((route) => [route.routeId, route.feeAmount || 0]),
+    );
+
+    return new Map(
+      allStudents
+        .filter(
+          (student) =>
+            Boolean(student.routeId) &&
+            (routeMap.get(student.routeId || "") || 0) > 0,
+        )
+        .map((student) => [
+          student.uid,
+          routeMap.get(student.routeId || "") || 0,
+        ]),
+    );
+  }, [allStudents, routes]);
+
+  useEffect(() => {
+    const submitted = allPayments.filter((payment) =>
+      isSubmittedForReview(payment),
+    );
+    const verified = allPayments.filter((payment) =>
+      isVerifiedPayment(payment),
+    );
+    const collected = verified.reduce(
+      (sum, payment) => sum + normalizeFeeAmount(payment),
+      0,
+    );
+
+    setPendingPayments(submitted);
+    setPendingCount(submitted.length);
+    setVerifiedCount(verified.length);
+    setTotalCollected(collected);
+
+    const settledStudents = new Set(
+      allPayments
+        .filter((payment) => isSettledForMonth(payment))
+        .map((payment) => payment.studentId),
+    );
+
+    const dueStudentsCount = Array.from(studentFeeMap.keys()).filter(
+      (studentId) => !settledStudents.has(studentId),
+    ).length;
+
+    setOutstandingCount(dueStudentsCount);
+  }, [allPayments, studentFeeMap]);
+
+  // Calculate outstanding fees students
+  useEffect(() => {
+    const outstanding = allStudents
+      .map((student) => {
+        const monthlyFeeAmount = studentFeeMap.get(student.uid) || 0;
+        if (monthlyFeeAmount <= 0) {
+          return null;
+        }
+
+        const payment = allPayments.find((p) => p.studentId === student.uid);
+        const route = routes.find((r) => r.routeId === student.routeId);
+        const monthStart = new Date(`${selectedMonth}-01`);
+        const daysSinceStart = Math.floor(
+          (new Date().getTime() - monthStart.getTime()) / (1000 * 60 * 60 * 24),
         );
-        const verified = payments.filter((p) => p.paymentStatus === "verified");
-        const collected = verified.reduce((sum, p) => sum + p.amount, 0);
 
-        // Outstanding = total potential fees - collected
-        const totalPotentialFees = allStudents.length * 5000; // Assuming 5000 PKR average fee
-        const outstanding = totalPotentialFees - collected;
+        return {
+          ...student,
+          monthlyFeeAmount,
+          daysSinceStart,
+        };
+      })
+      .filter(Boolean) as (User & {
+      monthlyFeeAmount: number;
+      daysSinceStart: number;
+    })[];
 
-        data.push({
-          month: monthStr,
-          collected,
-          outstanding: Math.max(0, outstanding),
-        });
-      }
+    const filtered = outstanding.filter(
+      (s) =>
+        !allPayments.find((p) => p.studentId === s.uid && isSettledForMonth(p)),
+    );
 
-      setRevenueData(data);
-    };
+    setOutstandingStudents(filtered);
+  }, [allStudents, allPayments, routes, selectedMonth, studentFeeMap]);
 
-    if (allStudents.length > 0) {
-      fetchRevenueData();
-    }
-  }, [allStudents.length]);
+  // Build 6-month revenue data from real payment + route/student data
+  useEffect(() => {
+    const monthKeys = getRecentMonthKeys(6);
+
+    const data = monthKeys.map((monthKey) => {
+      const monthPayments = allPaymentsHistory.filter(
+        (payment) => payment.month === monthKey,
+      );
+
+      const collected = monthPayments
+        .filter((payment) => isVerifiedPayment(payment))
+        .reduce((sum, payment) => sum + normalizeFeeAmount(payment), 0);
+
+      const settledStudents = new Set(
+        monthPayments
+          .filter((payment) => isSettledForMonth(payment))
+          .map((payment) => payment.studentId),
+      );
+
+      const outstanding = Array.from(studentFeeMap.entries()).reduce(
+        (sum, [studentId, feeAmount]) =>
+          settledStudents.has(studentId) ? sum : sum + feeAmount,
+        0,
+      );
+
+      return {
+        month: monthKey,
+        collected,
+        outstanding,
+      };
+    });
+
+    setRevenueData(data);
+  }, [allPaymentsHistory, studentFeeMap]);
 
   // Filter and sort all payments for the "All Payments" tab
   const filteredAllPayments = useMemo(() => {
@@ -262,13 +357,15 @@ export default function FeesPage() {
         case "name":
           return a.studentName.localeCompare(b.studentName);
         case "amount":
-          return b.amount - a.amount;
+          return normalizeFeeAmount(b) - normalizeFeeAmount(a);
         case "date":
           return (
             (b.submittedAt?.toMillis() || 0) - (a.submittedAt?.toMillis() || 0)
           );
         case "status":
-          return a.paymentStatus.localeCompare(b.paymentStatus);
+          return normalizeFeeStatus(a.paymentStatus).localeCompare(
+            normalizeFeeStatus(b.paymentStatus),
+          );
         default:
           return 0;
       }
@@ -414,7 +511,7 @@ export default function FeesPage() {
       return "bg-violet-100 text-violet-800";
     }
 
-    switch (payment.paymentStatus) {
+    switch (normalizeFeeStatus(payment.paymentStatus)) {
       case "verified":
         return "bg-green-100 text-green-800";
       case "submitted":
@@ -1176,7 +1273,7 @@ export default function FeesPage() {
       </div>
 
       {/* Revenue Chart */}
-      <RevenueChart data={revenueData} />
+      <RevenueChart data={revenueData} isLoading={revenueLoading} />
 
       {/* Modals */}
       <ReceiptModal

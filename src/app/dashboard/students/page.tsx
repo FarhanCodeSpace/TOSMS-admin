@@ -9,6 +9,7 @@ import {
   Eye,
   GitBranch,
   Trash2,
+  Unlink2,
   ChevronLeft,
   ChevronRight,
   Users,
@@ -22,13 +23,21 @@ import Badge from "@/components/ui/Badge";
 import StatsCard from "@/components/ui/StatsCard";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { getInitials } from "@/utils/formatters";
-import { removeStudentFromRoute } from "@/utils/firestoreHelpers";
+import { isFeeExempt, normalizeFeeStatus } from "@/utils/feeHelpers";
+import {
+  removeStudentFromRoute,
+  deleteStudentAccount,
+} from "@/utils/firestoreHelpers";
 import StudentDetailModal from "./StudentDetailModal";
 import AssignStudentToRouteModal from "./AssignStudentToRouteModal";
 
 type StudentWithDetails = User & {
   routeName?: string;
-  feeStatus?: "verified" | "submitted" | "due" | "no_data";
+  feeStatus?: "verified" | "submitted" | "due" | "exempt" | "no_data";
+};
+
+type FeePaymentWithFallback = FeePayment & {
+  fareAmount?: number;
 };
 
 const ITEMS_PER_PAGE = 20;
@@ -36,7 +45,7 @@ const ITEMS_PER_PAGE = 20;
 export default function StudentsPage() {
   const [students, setStudents] = useState<StudentWithDetails[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
-  const [feePayments, setFeePayments] = useState<FeePayment[]>([]);
+  const [feePayments, setFeePayments] = useState<FeePaymentWithFallback[]>([]);
 
   // UI State
   const [searchTerm, setSearchTerm] = useState("");
@@ -55,6 +64,11 @@ export default function StudentsPage() {
     null,
   );
   const [isRemoving, setIsRemoving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<StudentWithDetails | null>(
+    null,
+  );
+  const [isDeletingStudent, setIsDeletingStudent] = useState(false);
 
   // Fetch students
   useEffect(() => {
@@ -102,7 +116,7 @@ export default function StudentsPage() {
         const payments = snapshot.docs.map((doc) => ({
           ...doc.data(),
           paymentId: doc.id,
-        })) as FeePayment[];
+        })) as FeePaymentWithFallback[];
         setFeePayments(payments);
       },
     );
@@ -111,17 +125,31 @@ export default function StudentsPage() {
 
   // Enrich students with route and fee data
   const enrichedStudents = useMemo(() => {
+    const routeFeeById = new Map(
+      routes.map((route) => [route.routeId, route.feeAmount || 0]),
+    );
+
     return students.map((student) => {
       const route = routes.find((r) => r.routeId === student.routeId);
       const payment = feePayments.find((p) => p.studentId === student.uid);
+      const hasPayableRoute =
+        Boolean(student.routeId) &&
+        (routeFeeById.get(student.routeId || "") || 0) > 0;
 
-      let feeStatus: "verified" | "submitted" | "due" | "no_data" = "no_data";
+      let feeStatus: "verified" | "submitted" | "due" | "exempt" | "no_data" =
+        "no_data";
       if (payment) {
-        feeStatus = payment.paymentStatus as "verified" | "submitted" | "due";
-      } else if (!student.routeId) {
-        feeStatus = "no_data"; // Unassigned, no fee
+        if (isFeeExempt(payment)) {
+          feeStatus = "exempt";
+        } else {
+          const normalizedStatus = normalizeFeeStatus(payment.paymentStatus);
+          feeStatus =
+            normalizedStatus === "verified" ? "verified" : "submitted";
+        }
+      } else if (!hasPayableRoute) {
+        feeStatus = "no_data";
       } else {
-        feeStatus = "due"; // Has route, no payment = due
+        feeStatus = "due";
       }
 
       return {
@@ -173,6 +201,23 @@ export default function StudentsPage() {
 
   // CSV Export
   const exportCSV = () => {
+    const normalizeCsvText = (value: unknown): string => {
+      if (value === null || value === undefined) return "";
+      return String(value).replace(/\r?\n|\r/g, " ");
+    };
+
+    const forceExcelText = (value: unknown): string => {
+      const text = normalizeCsvText(value);
+      if (!text) return "";
+      // Prefix with tab so Excel keeps values as text (e.g. phone/address-like values).
+      return `\t${text}`;
+    };
+
+    const escapeCsvCell = (value: unknown): string => {
+      const safe = normalizeCsvText(value).replace(/"/g, '""');
+      return `"${safe}"`;
+    };
+
     const headers = [
       "Name",
       "Email",
@@ -183,23 +228,24 @@ export default function StudentsPage() {
       "Registration Date",
     ];
     const rows = enrichedStudents.map((student) => [
-      student.fullName || "",
-      student.email || "",
-      student.phone || "",
-      student.routeName || "Unassigned",
-      student.pickupStop || "-",
-      student.feeStatus || "-",
+      normalizeCsvText(student.fullName),
+      normalizeCsvText(student.email),
+      forceExcelText(student.phone),
+      normalizeCsvText(student.routeName || "Unassigned"),
+      forceExcelText(student.pickupStop || "-"),
+      normalizeCsvText(student.feeStatus || "-"),
       student.createdAt
-        ? format(student.createdAt.toDate(), "yyyy-MM-dd")
+        ? forceExcelText(format(student.createdAt.toDate(), "yyyy-MM-dd"))
         : "-",
     ]);
 
     const csv = [
-      headers.join(","),
-      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
+      headers.map((header) => escapeCsvCell(header)).join(","),
+      ...rows.map((row) => row.map((cell) => escapeCsvCell(cell)).join(",")),
     ].join("\n");
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const csvWithBom = `\uFEFF${csv}`;
+    const blob = new Blob([csvWithBom], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
     link.setAttribute("href", url);
@@ -244,6 +290,36 @@ export default function StudentsPage() {
   const handleRemoveClick = (student: StudentWithDetails) => {
     setRemoveTarget(student);
     setRemoveConfirmOpen(true);
+  };
+
+  const handleDeleteClick = (student: StudentWithDetails) => {
+    setDeleteTarget(student);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+
+    setIsDeletingStudent(true);
+    try {
+      await deleteStudentAccount(deleteTarget.uid);
+      toast.success("Student deleted successfully");
+      setDeleteConfirmOpen(false);
+      setDeleteTarget(null);
+    } catch (error: unknown) {
+      console.error("Error deleting student:", error);
+
+      const errorMessage =
+        error instanceof Error ? error.message.toLowerCase() : "";
+
+      if (errorMessage.includes("permission")) {
+        toast.error("Permission denied while deleting student records");
+      } else {
+        toast.error("Failed to delete student");
+      }
+    } finally {
+      setIsDeletingStudent(false);
+    }
   };
 
   return (
@@ -417,11 +493,13 @@ export default function StudentsPage() {
                   <Badge status={student.feeStatus || "no_data"}>
                     {student.feeStatus === "verified"
                       ? "Verified"
-                      : student.feeStatus === "submitted"
-                        ? "Submitted"
-                        : student.feeStatus === "due"
-                          ? "Due"
-                          : "No Fee"}
+                      : student.feeStatus === "exempt"
+                        ? "Exempt"
+                        : student.feeStatus === "submitted"
+                          ? "Submitted"
+                          : student.feeStatus === "due"
+                            ? "Due"
+                            : "No Fee"}
                   </Badge>
                 </td>
                 <td className="px-6 py-4 text-sm text-slate-600">
@@ -448,12 +526,21 @@ export default function StudentsPage() {
                     {student.routeId && (
                       <button
                         onClick={() => handleRemoveClick(student)}
-                        className="p-2 hover:bg-rose-50 rounded transition"
+                        className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
                         title="Remove from route"
                       >
-                        <Trash2 size={18} className="text-rose-600" />
+                        <Unlink2 size={14} />
+                        Unassign
                       </button>
                     )}
+                    <button
+                      onClick={() => handleDeleteClick(student)}
+                      className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                      title="Delete student"
+                    >
+                      <Trash2 size={14} />
+                      Delete
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -525,6 +612,20 @@ export default function StudentsPage() {
         }}
         destructive
         isLoading={isRemoving}
+      />
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title="Delete Student"
+        message={`Delete ${deleteTarget?.fullName}? This will permanently remove the student account and related availability records.`}
+        confirmLabel="Delete"
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => {
+          setDeleteConfirmOpen(false);
+          setDeleteTarget(null);
+        }}
+        destructive
+        isLoading={isDeletingStudent}
       />
     </div>
   );

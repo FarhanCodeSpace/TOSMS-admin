@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { User, Route } from "@/types";
-import { Eye, Pause } from "lucide-react";
+import { Eye, Pause, Trash2 } from "lucide-react";
 import Badge from "@/components/ui/Badge";
 
 interface DriverTableProps {
@@ -14,6 +14,8 @@ interface DriverTableProps {
   onSuspend: (...args: [User]) => void;
   // eslint-disable-next-line no-unused-vars
   onAssignRoute: (...args: [User]) => void;
+  // eslint-disable-next-line no-unused-vars
+  onDelete: (...args: [User]) => void;
 }
 
 function getVehicleIcon(vehicleType?: string): string {
@@ -40,6 +42,7 @@ export default function DriverTable({
   onViewDriver,
   onSuspend,
   onAssignRoute,
+  onDelete,
 }: DriverTableProps) {
   const getAssignedRouteName = (driverId: string): string => {
     const route = routes.find((r) => r.assignedDriverId === driverId);
@@ -176,6 +179,13 @@ export default function DriverTable({
                       title="Suspend driver"
                     >
                       <Pause className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => onDelete(driver)}
+                      className="inline-flex items-center justify-center p-1.5 rounded-lg text-rose-600 hover:bg-rose-100 transition"
+                      title="Delete driver"
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                 </td>

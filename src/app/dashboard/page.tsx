@@ -13,23 +13,28 @@ import {
 } from "recharts";
 import {
   collection,
-  getDocs,
   onSnapshot,
   orderBy,
   query,
   where,
   limit,
 } from "firebase/firestore";
-import { format, subMonths } from "date-fns";
-import { MapPin, Users, GraduationCap, Bus, Sparkles } from "lucide-react";
+import { addDays, format, subMonths } from "date-fns";
+import { MapPin, Users, GraduationCap, Bus } from "lucide-react";
+import toast from "react-hot-toast";
 
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
+import { useAuth } from "@/context/AuthContext";
+import {
+  isSubmittedForReview,
+  isVerifiedPayment,
+  normalizeFeeAmount,
+} from "@/utils/feeHelpers";
 import StatsCard from "@/components/ui/StatsCard";
 import ActivityFeed from "@/components/ui/ActivityFeed";
 import Badge from "@/components/ui/Badge";
-import EmptyState from "@/components/ui/EmptyState";
-import Modal from "@/components/ui/Modal";
+import SkeletonLoader from "@/components/ui/SkeletonLoader";
 
 const today = new Date();
 const todayString = format(today, "yyyy-MM-dd");
@@ -56,7 +61,7 @@ type AvailabilityRecord = {
 type FeePaymentRecord = {
   id: string;
   paymentStatus: string;
-  fareAmount: number;
+  amount: number;
   month: string;
   submittedAt: Date | null;
   studentName: string;
@@ -93,6 +98,10 @@ function getMonthLabels(count: number) {
 }
 
 export default function DashboardPage() {
+  const { currentUser, isLoading: authLoading } = useAuth();
+  const [availabilityView, setAvailabilityView] = useState<
+    "today" | "tomorrow"
+  >("today");
   const [activeRoutesCount, setActiveRoutesCount] = useState(0);
   const [activeDriversCount, setActiveDriversCount] = useState(0);
   const [pendingDriversCount, setPendingDriversCount] = useState(0);
@@ -110,82 +119,175 @@ export default function DashboardPage() {
   const [feeChartData, setFeeChartData] = useState<
     { month: string; total: number }[]
   >([]);
+  const [isFeeCardLoading, setIsFeeCardLoading] = useState(true);
+  const [isAvailabilityLoading, setIsAvailabilityLoading] = useState(true);
+  const [hasLoadedRoutes, setHasLoadedRoutes] = useState(false);
+  const [hasLoadedAvailability, setHasLoadedAvailability] = useState(false);
   const [recentPayments, setRecentPayments] = useState<FeePaymentRecord[]>([]);
-  const [isRouteModalOpen, setIsRouteModalOpen] = useState(false);
-  const [isRideModalOpen, setIsRideModalOpen] = useState(false);
+
+  const availabilityDateString = useMemo(
+    () =>
+      format(
+        addDays(today, availabilityView === "tomorrow" ? 1 : 0),
+        "yyyy-MM-dd",
+      ),
+    [availabilityView],
+  );
+
+  const availabilityDisplay = useMemo(
+    () =>
+      format(
+        addDays(today, availabilityView === "tomorrow" ? 1 : 0),
+        "EEEE, MMMM d, yyyy",
+      ),
+    [availabilityView],
+  );
 
   useEffect(() => {
+    setIsAvailabilityLoading(!(hasLoadedRoutes && hasLoadedAvailability));
+  }, [hasLoadedRoutes, hasLoadedAvailability]);
+
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setActiveRoutesCount(0);
+      setRouteRecords([]);
+      setHasLoadedRoutes(true);
+      return;
+    }
+
+    setHasLoadedRoutes(false);
+
     const activeRoutesQuery = query(
       collection(db, COLLECTIONS.ROUTES),
       where("isActive", "==", true),
     );
 
-    const unsub = onSnapshot(activeRoutesQuery, (snapshot) => {
-      setActiveRoutesCount(snapshot.size);
-      setRouteRecords(
-        snapshot.docs.map((doc) => {
-          const data = doc.data() as RouteRecord;
-          return {
-            ...data,
-            routeId: doc.id,
-          };
-        }),
-      );
-    });
+    const unsub = onSnapshot(
+      activeRoutesQuery,
+      (snapshot) => {
+        setActiveRoutesCount(snapshot.size);
+        setRouteRecords(
+          snapshot.docs.map((doc) => {
+            const data = doc.data() as RouteRecord;
+            return {
+              ...data,
+              routeId: doc.id,
+            };
+          }),
+        );
+        setHasLoadedRoutes(true);
+      },
+      (error) => {
+        console.error("Dashboard routes subscription failed:", error);
+        setHasLoadedRoutes(true);
+        toast.error("Unable to load routes on dashboard");
+      },
+    );
 
     return () => unsub();
-  }, []);
+  }, [authLoading, currentUser]);
 
   useEffect(() => {
-    const activeDriversQuery = query(
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setActiveDriversCount(0);
+      setPendingDriversCount(0);
+      return;
+    }
+
+    const driversQuery = query(
       collection(db, COLLECTIONS.USERS),
       where("role", "==", "driver"),
-      where("status", "==", "active"),
     );
 
-    const pendingDriversQuery = query(
-      collection(db, COLLECTIONS.USERS),
-      where("role", "==", "driver"),
-      where("status", "==", "pending"),
+    const unsubscribe = onSnapshot(
+      driversQuery,
+      (snapshot) => {
+        const drivers = snapshot.docs.map((driverDoc) =>
+          driverDoc.data(),
+        ) as Array<{
+          status?: string;
+          approved?: boolean;
+          profileComplete?: boolean;
+        }>;
+
+        const activeDrivers = drivers.filter(
+          (driver) => driver.status === "active",
+        ).length;
+
+        const pendingDrivers = drivers.filter(
+          (driver) =>
+            driver.approved === false && driver.profileComplete === true,
+        ).length;
+
+        setActiveDriversCount(activeDrivers);
+        setPendingDriversCount(pendingDrivers);
+      },
+      (error) => {
+        console.error("Dashboard drivers subscription failed:", error);
+      },
     );
 
-    const unsubActiveDrivers = onSnapshot(activeDriversQuery, (snapshot) => {
-      setActiveDriversCount(snapshot.size);
-    });
-    const unsubPendingDrivers = onSnapshot(pendingDriversQuery, (snapshot) => {
-      setPendingDriversCount(snapshot.size);
-    });
-
-    return () => {
-      unsubActiveDrivers();
-      unsubPendingDrivers();
-    };
-  }, []);
+    return () => unsubscribe();
+  }, [authLoading, currentUser]);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setTotalStudentsCount(0);
+      setUnassignedStudentsCount(0);
+      return;
+    }
+
     const studentsQuery = query(
       collection(db, COLLECTIONS.USERS),
       where("role", "==", "student"),
     );
 
-    const unsubStudents = onSnapshot(studentsQuery, (snapshot) => {
-      let unassigned = 0;
+    const unsubStudents = onSnapshot(
+      studentsQuery,
+      (snapshot) => {
+        let unassigned = 0;
 
-      snapshot.docs.forEach((doc) => {
-        const data = doc.data() as { routeId?: string };
-        if (!data.routeId) {
-          unassigned += 1;
-        }
-      });
+        snapshot.docs.forEach((doc) => {
+          const data = doc.data() as { routeId?: string };
+          if (!data.routeId) {
+            unassigned += 1;
+          }
+        });
 
-      setTotalStudentsCount(snapshot.size);
-      setUnassignedStudentsCount(unassigned);
-    });
+        setTotalStudentsCount(snapshot.size);
+        setUnassignedStudentsCount(unassigned);
+      },
+      (error) => {
+        console.error("Dashboard students subscription failed:", error);
+      },
+    );
 
     return () => unsubStudents();
-  }, []);
+  }, [authLoading, currentUser]);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setActiveRidesCount(0);
+      setScheduledRidesCount(0);
+      return;
+    }
+
     const activeRidesQuery = query(
       collection(db, COLLECTIONS.RIDES),
       where("status", "==", "active"),
@@ -198,140 +300,226 @@ export default function DashboardPage() {
       where("date", "==", todayString),
     );
 
-    const unsubActiveRides = onSnapshot(activeRidesQuery, (snapshot) => {
-      setActiveRidesCount(snapshot.size);
-    });
-    const unsubScheduledRides = onSnapshot(scheduledRidesQuery, (snapshot) => {
-      setScheduledRidesCount(snapshot.size);
-    });
+    const unsubActiveRides = onSnapshot(
+      activeRidesQuery,
+      (snapshot) => {
+        setActiveRidesCount(snapshot.size);
+      },
+      (error) => {
+        console.error("Dashboard active rides subscription failed:", error);
+      },
+    );
+    const unsubScheduledRides = onSnapshot(
+      scheduledRidesQuery,
+      (snapshot) => {
+        setScheduledRidesCount(snapshot.size);
+      },
+      (error) => {
+        console.error("Dashboard scheduled rides subscription failed:", error);
+      },
+    );
 
     return () => {
       unsubActiveRides();
       unsubScheduledRides();
     };
-  }, []);
+  }, [authLoading, currentUser]);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setAvailabilityRecords([]);
+      setHasLoadedAvailability(true);
+      return;
+    }
+
+    setHasLoadedAvailability(false);
+    setAvailabilityRecords([]);
+
     const availabilityQuery = query(
       collection(db, COLLECTIONS.AVAILABILITY),
-      where("date", "==", todayString),
+      where("date", "==", availabilityDateString),
     );
 
-    const unsubAvailability = onSnapshot(availabilityQuery, (snapshot) => {
-      setAvailabilityRecords(
-        snapshot.docs.map((doc) => doc.data() as AvailabilityRecord),
-      );
-    });
+    const unsubAvailability = onSnapshot(
+      availabilityQuery,
+      (snapshot) => {
+        setAvailabilityRecords(
+          snapshot.docs.map((doc) => doc.data() as AvailabilityRecord),
+        );
+        setHasLoadedAvailability(true);
+      },
+      (error) => {
+        console.error("Dashboard availability subscription failed:", error);
+        setHasLoadedAvailability(true);
+      },
+    );
 
     return () => unsubAvailability();
-  }, []);
+  }, [authLoading, currentUser, availabilityDateString]);
 
   useEffect(() => {
-    const feeQuery = query(
-      collection(db, COLLECTIONS.FEE_PAYMENTS),
-      where("month", "==", currentMonthString),
-    );
+    if (authLoading) {
+      return;
+    }
 
-    const unsubFees = onSnapshot(feeQuery, (snapshot) => {
-      let collected = 0;
-      let pending = 0;
-      let verified = 0;
+    if (!currentUser) {
+      setFeeTotalCollected(0);
+      setFeePendingCount(0);
+      setFeeVerifiedCount(0);
+      setFeeChartData([]);
+      setIsFeeCardLoading(false);
+      return;
+    }
 
-      snapshot.docs.forEach((doc) => {
-        const data = doc.data() as {
-          fareAmount?: number;
-          amount?: number;
-          paymentStatus?: string;
-        };
-        const amount = Number(data.fareAmount ?? data.amount ?? 0);
+    setIsFeeCardLoading(true);
+    const allFeesQuery = collection(db, COLLECTIONS.FEE_PAYMENTS);
 
-        switch (data.paymentStatus) {
-          case "verified":
-            collected += amount;
-            verified += 1;
-            break;
-          case "submitted":
-          case "pending":
-            pending += 1;
-            break;
-          default:
-            break;
-        }
-      });
+    const unsubFees = onSnapshot(
+      allFeesQuery,
+      (snapshot) => {
+        const payments = snapshot.docs.map((feeDoc) => {
+          const data = feeDoc.data() as {
+            fareAmount?: number;
+            amount?: number;
+            paymentStatus?: string;
+            month?: string;
+            feeExempt?: boolean;
+          };
 
-      setFeeTotalCollected(collected);
-      setFeePendingCount(pending);
-      setFeeVerifiedCount(verified);
-    });
+          return {
+            ...data,
+            amountValue: normalizeFeeAmount(data),
+            month: data.month ?? "",
+            paymentStatus: data.paymentStatus,
+            feeExempt: data.feeExempt === true,
+          };
+        });
 
-    const monthLabels = getMonthLabels(6);
-    Promise.all(
-      monthLabels.map(async ({ monthKey, monthLabel }) => {
-        const snapshot = await getDocs(
-          query(
-            collection(db, COLLECTIONS.FEE_PAYMENTS),
-            where("month", "==", monthKey),
-          ),
+        const currentMonthPayments = payments.filter(
+          (payment) => payment.month === currentMonthString,
         );
 
-        return {
-          month: monthLabel,
-          total: snapshot.docs.reduce((sum, doc) => {
-            const data = doc.data() as { fareAmount?: number; amount?: number };
-            return sum + Number(data.fareAmount ?? data.amount ?? 0);
-          }, 0),
-        };
-      }),
-    ).then(setFeeChartData);
+        let collected = 0;
+        let pending = 0;
+        let verified = 0;
 
-    return () => unsubFees();
-  }, []);
+        currentMonthPayments.forEach((payment) => {
+          if (isVerifiedPayment(payment)) {
+            collected += payment.amountValue;
+            verified += 1;
+          }
+
+          if (isSubmittedForReview(payment)) {
+            pending += 1;
+          }
+        });
+
+        setFeeTotalCollected(collected);
+        setFeePendingCount(pending);
+        setFeeVerifiedCount(verified);
+
+        const monthTotals = new Map<string, number>();
+        payments.forEach((payment) => {
+          if (!isVerifiedPayment(payment)) {
+            return;
+          }
+
+          monthTotals.set(
+            payment.month,
+            (monthTotals.get(payment.month) || 0) + payment.amountValue,
+          );
+        });
+
+        const chartSeries = getMonthLabels(6).map(
+          ({ monthKey, monthLabel }) => ({
+            month: monthLabel,
+            total: monthTotals.get(monthKey) || 0,
+          }),
+        );
+
+        setFeeChartData(chartSeries);
+        setIsFeeCardLoading(false);
+      },
+      (error) => {
+        console.error("Dashboard fees subscription failed:", error);
+        setIsFeeCardLoading(false);
+      },
+    );
+
+    return () => {
+      unsubFees();
+    };
+  }, [authLoading, currentUser]);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setRecentPayments([]);
+      return;
+    }
+
     const recentQuery = query(
       collection(db, COLLECTIONS.FEE_PAYMENTS),
       orderBy("submittedAt", "desc"),
       limit(8),
     );
 
-    const unsubRecent = onSnapshot(recentQuery, (snapshot) => {
-      setRecentPayments(
-        snapshot.docs.map((doc) => {
-          const data = doc.data() as {
-            paymentStatus?: string;
-            fareAmount?: number;
-            month?: string;
-            submittedAt?: { toDate?: () => Date } | Date;
-            studentName?: string;
-            paymentMethod?: string;
-          };
+    const unsubRecent = onSnapshot(
+      recentQuery,
+      (snapshot) => {
+        setRecentPayments(
+          snapshot.docs
+            .map((doc) => {
+              const data = doc.data() as {
+                paymentStatus?: string;
+                fareAmount?: number;
+                amount?: number;
+                month?: string;
+                submittedAt?: { toDate?: () => Date } | Date;
+                studentName?: string;
+                paymentMethod?: string;
+                feeExempt?: boolean;
+              };
 
-          const submittedAtRaw = data.submittedAt as any;
-          const submittedAt = submittedAtRaw?.toDate
-            ? submittedAtRaw.toDate()
-            : submittedAtRaw instanceof Date
-              ? submittedAtRaw
-              : null;
+              const submittedAtRaw = data.submittedAt as any;
+              const submittedAt = submittedAtRaw?.toDate
+                ? submittedAtRaw.toDate()
+                : submittedAtRaw instanceof Date
+                  ? submittedAtRaw
+                  : null;
 
-          return {
-            id: doc.id,
-            paymentStatus: data.paymentStatus ?? "submitted",
-            fareAmount: Number(data.fareAmount ?? 0),
-            month: data.month ?? "Unknown",
-            submittedAt,
-            studentName: data.studentName ?? "Student",
-            paymentMethod: data.paymentMethod ?? "payment",
-          };
-        }),
-      );
-    });
+              return {
+                id: doc.id,
+                paymentStatus: data.paymentStatus ?? "submitted",
+                amount: Number(data.amount ?? data.fareAmount ?? 0),
+                month: data.month ?? "Unknown",
+                submittedAt,
+                studentName: data.studentName ?? "Student",
+                paymentMethod: data.paymentMethod ?? "payment",
+                feeExempt: data.feeExempt === true,
+              };
+            })
+            .filter((payment) => !payment.feeExempt),
+        );
+      },
+      (error) => {
+        console.error("Dashboard recent activity subscription failed:", error);
+      },
+    );
 
     return () => unsubRecent();
-  }, []);
+  }, [authLoading, currentUser]);
 
   const availabilitySummary = useMemo<AvailabilitySummary[]>(() => {
     return routeRecords.map((route) => {
-      const studentIds = route.studentIds ?? [];
+      const studentsInRoute = route.studentIds?.length ?? 0;
       const studentResponses = availabilityRecords.filter(
         (record) =>
           record.routeId === route.routeId && record.role === "student",
@@ -344,7 +532,7 @@ export default function DashboardPage() {
         (record) => !record.isAvailable,
       ).length;
       const respondedCount = availableCount + notAvailableCount;
-      const noResponseCount = Math.max(studentIds.length - respondedCount, 0);
+      const noResponseCount = Math.max(studentsInRoute - respondedCount, 0);
 
       const driverAvailability = availabilityRecords.find(
         (record) =>
@@ -379,8 +567,8 @@ export default function DashboardPage() {
         notAvailableCount,
         noResponseCount,
         responseRate:
-          studentIds.length > 0
-            ? Math.round((respondedCount / studentIds.length) * 100)
+          studentsInRoute > 0
+            ? Math.round((respondedCount / studentsInRoute) * 100)
             : 0,
       };
     });
@@ -426,7 +614,10 @@ export default function DashboardPage() {
           iconColor="#92400E"
           footer={
             <Link
-              href={{ pathname: "/drivers", query: { tab: "pending" } }}
+              href={{
+                pathname: "/dashboard/drivers",
+                query: { tab: "pending" },
+              }}
               className="inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800 transition hover:bg-amber-200"
             >
               {pendingDriversCount} pending approval
@@ -466,26 +657,104 @@ export default function DashboardPage() {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              Today&apos;s Availability Overview
+              {availabilityView === "today"
+                ? "Today's Availability Overview"
+                : "Tomorrow's Availability Overview"}
             </h2>
             <p className="mt-1 text-sm text-gray-600">
-              Route availability summary
+              Route availability summary for {availabilityDisplay}
             </p>
           </div>
-          <div className="flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700">
-            <span className="h-2 w-2 rounded-full bg-green-500" />
-            Live
+          <div className="flex items-center gap-2">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-1">
+              <button
+                type="button"
+                onClick={() => setAvailabilityView("today")}
+                className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
+                  availabilityView === "today"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => setAvailabilityView("tomorrow")}
+                className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
+                  availabilityView === "tomorrow"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Tomorrow
+              </button>
+            </div>
+            <div className="flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700">
+              <span className="h-2 w-2 rounded-full bg-green-500" />
+              Live
+            </div>
           </div>
         </div>
 
-        {availabilitySummary.length === 0 ? (
-          <EmptyState
-            icon={<Sparkles className="h-8 w-8" />}
-            title="No routes available"
-            subtitle="No active route availability has been reported for today."
-            actionLabel="Refresh data"
-            onAction={() => window.location.reload()}
-          />
+        {isAvailabilityLoading ? (
+          <div className="space-y-3">
+            <SkeletonLoader rows={1} className="h-4 w-1/3" />
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">
+                      Route Name
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">
+                      Driver Status
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">
+                      Available
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">
+                      Not Available
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">
+                      No Response
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600">
+                      Response Rate
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <tr key={index}>
+                      <td className="px-4 py-4">
+                        <SkeletonLoader className="h-4 w-28" />
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="h-6 w-36 animate-pulse rounded-full bg-slate-200" />
+                      </td>
+                      <td className="px-4 py-4">
+                        <SkeletonLoader className="mx-auto h-4 w-8" />
+                      </td>
+                      <td className="px-4 py-4">
+                        <SkeletonLoader className="mx-auto h-4 w-8" />
+                      </td>
+                      <td className="px-4 py-4">
+                        <SkeletonLoader className="mx-auto h-4 w-8" />
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="ml-auto h-4 w-20 animate-pulse rounded bg-slate-200" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : availabilitySummary.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
+            No active routes available for this date.
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -566,7 +835,7 @@ export default function DashboardPage() {
               </p>
             </div>
             <Link
-              href={{ pathname: "/fees", query: { tab: "pending" } }}
+              href={{ pathname: "/dashboard/fees", query: { tab: "pending" } }}
               className="inline-flex rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-200"
             >
               Review Now
@@ -574,63 +843,92 @@ export default function DashboardPage() {
           </div>
 
           {/* Fee Summary Cards */}
-          <div className="mb-6 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-lg bg-gray-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">
-                Total Collected
-              </p>
-              <p className="mt-2 text-2xl font-bold text-gray-900">
-                {formatPKR(feeTotalCollected)}
-              </p>
+          {isFeeCardLoading ? (
+            <div className="mb-6 grid gap-3 sm:grid-cols-3">
+              <SkeletonLoader variant="card" className="rounded-lg p-4" />
+              <SkeletonLoader variant="card" className="rounded-lg p-4" />
+              <SkeletonLoader variant="card" className="rounded-lg p-4" />
             </div>
-            <div className="rounded-lg bg-amber-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
-                Pending Reviews
-              </p>
-              <p className="mt-2 text-2xl font-bold text-amber-700">
-                {feePendingCount}
-              </p>
+          ) : (
+            <div className="mb-6 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-lg bg-gray-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">
+                  Total Collected
+                </p>
+                <p className="mt-2 text-2xl font-bold text-gray-900">
+                  {formatPKR(feeTotalCollected)}
+                </p>
+              </div>
+              <div className="rounded-lg bg-amber-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                  Pending Reviews
+                </p>
+                <p className="mt-2 text-2xl font-bold text-amber-700">
+                  {feePendingCount}
+                </p>
+              </div>
+              <div className="rounded-lg bg-green-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-green-700">
+                  Verified
+                </p>
+                <p className="mt-2 text-2xl font-bold text-green-700">
+                  {feeVerifiedCount}
+                </p>
+              </div>
             </div>
-            <div className="rounded-lg bg-green-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-green-700">
-                Verified
-              </p>
-              <p className="mt-2 text-2xl font-bold text-green-700">
-                {feeVerifiedCount}
-              </p>
-            </div>
-          </div>
+          )}
 
           {/* Fee Chart */}
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={feeChartData}
-                margin={{ top: 5, right: 10, left: -20, bottom: 0 }}
-              >
-                <CartesianGrid stroke="#E5E7EB" vertical={false} />
-                <XAxis
-                  dataKey="month"
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fontSize: 12 }}
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fontSize: 12 }}
-                />
-                <Tooltip formatter={(value: number) => formatPKR(value)} />
-                <Bar dataKey="total" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {isFeeCardLoading ? (
+            <div className="h-48 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="animate-pulse h-full">
+                <div className="flex h-full items-end gap-3">
+                  {Array.from({ length: 6 }).map((_, index) => (
+                    <div key={index} className="flex-1 space-y-2">
+                      <div
+                        className="w-full rounded-t bg-slate-200"
+                        style={{ height: `${25 + ((index * 13) % 45)}%` }}
+                      />
+                      <div className="mx-auto h-2 w-8 rounded bg-slate-200" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={feeChartData}
+                  margin={{ top: 5, right: 10, left: -20, bottom: 0 }}
+                >
+                  <CartesianGrid stroke="#E5E7EB" vertical={false} />
+                  <XAxis
+                    dataKey="month"
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 12 }}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tick={{ fontSize: 12 }}
+                  />
+                  <Tooltip formatter={(value: number) => formatPKR(value)} />
+                  <Bar dataKey="total" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </section>
 
         {/* Recent Activity */}
         <ActivityFeed
           title="Recent Activity"
-          viewAllHref={{ pathname: "/fees", query: { tab: "pending" } }}
+          viewAllHref={{
+            pathname: "/dashboard/fees",
+            query: { tab: "pending" },
+          }}
           items={recentPayments.map((payment) => ({
             id: payment.id,
             title: `${payment.studentName} submitted ${payment.month} fee via ${payment.paymentMethod}`,
@@ -643,25 +941,26 @@ export default function DashboardPage() {
 
       {/* Quick Actions Row */}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <button
-          type="button"
-          onClick={() => setIsRouteModalOpen(true)}
-          className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
-        >
-          + Create Route
-        </button>
-        <button
-          type="button"
-          onClick={() => setIsRideModalOpen(true)}
-          className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
-        >
-          + Create Ride
-        </button>
         <Link
-          href={{ pathname: "/drivers", query: { tab: "pending" } }}
+          href={{ pathname: "/dashboard/routes", query: { create: "1" } }}
           className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
         >
-          Approve Drivers
+          <span aria-hidden>+</span>
+          <span>Create Route</span>
+        </Link>
+        <Link
+          href={{ pathname: "/dashboard/rides", query: { create: "1" } }}
+          className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
+        >
+          <span aria-hidden>+</span>
+          <span>Create Ride</span>
+        </Link>
+        <Link
+          href={{ pathname: "/dashboard/drivers", query: { tab: "pending" } }}
+          className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
+        >
+          <span aria-hidden>+</span>
+          <span>Approve Drivers</span>
           {pendingDriversCount > 0 && (
             <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
               {pendingDriversCount}
@@ -669,103 +968,13 @@ export default function DashboardPage() {
           )}
         </Link>
         <Link
-          href={{ pathname: "/availability" }}
-          className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
+          href={{ pathname: "/dashboard/availability" }}
+          className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
         >
-          View Availability
+          <span aria-hidden>+</span>
+          <span>View Availability</span>
         </Link>
       </section>
-
-      {/* Modals */}
-      <Modal
-        open={isRouteModalOpen}
-        onClose={() => setIsRouteModalOpen(false)}
-        title="Create Route"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-gray-600">
-            Add a new route and manage route details from the dashboard.
-          </p>
-          <div className="space-y-3">
-            <label className="block text-sm font-medium text-gray-700">
-              Route name
-              <input
-                type="text"
-                placeholder="North Campus Loop"
-                className="mt-1 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-            </label>
-            <label className="block text-sm font-medium text-gray-700">
-              Notes
-              <textarea
-                rows={3}
-                placeholder="Optional route details"
-                className="mt-1 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-            </label>
-          </div>
-          <div className="flex justify-end gap-3 pt-4">
-            <button
-              type="button"
-              onClick={() => setIsRouteModalOpen(false)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
-            >
-              Save Route
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        open={isRideModalOpen}
-        onClose={() => setIsRideModalOpen(false)}
-        title="Create Ride"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-gray-600">
-            Schedule a ride and keep operations aligned with student transport
-            needs.
-          </p>
-          <div className="space-y-3">
-            <label className="block text-sm font-medium text-gray-700">
-              Ride title
-              <input
-                type="text"
-                placeholder="Morning Campus Shuttle"
-                className="mt-1 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-            </label>
-            <label className="block text-sm font-medium text-gray-700">
-              Ride date
-              <input
-                type="date"
-                className="mt-1 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-            </label>
-          </div>
-          <div className="flex justify-end gap-3 pt-4">
-            <button
-              type="button"
-              onClick={() => setIsRideModalOpen(false)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
-            >
-              Save Ride
-            </button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }

@@ -16,6 +16,7 @@ import Modal from "@/components/ui/Modal";
 import Badge from "@/components/ui/Badge";
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
+import { useAuth } from "@/context/AuthContext";
 import { Route, User } from "@/types";
 
 type AssignDriverModalProps = {
@@ -35,6 +36,7 @@ export default function AssignDriverModal({
   route,
   initialDriverId,
 }: AssignDriverModalProps) {
+  const { currentUser, isLoading: authLoading } = useAuth();
   const [drivers, setDrivers] = useState<DriverWithCurrentRoute[]>([]);
   const [selectedDriverId, setSelectedDriverId] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -43,6 +45,11 @@ export default function AssignDriverModal({
 
   useEffect(() => {
     if (!open) return;
+    if (authLoading) return;
+    if (!currentUser) {
+      toast.error("You must be logged in to assign drivers");
+      return;
+    }
 
     setSelectedDriverId(initialDriverId || route.assignedDriverId || "");
     setSearchTerm("");
@@ -91,7 +98,14 @@ export default function AssignDriverModal({
     };
 
     loadData().catch(() => undefined);
-  }, [open, route.assignedDriverId, route.routeId, initialDriverId]);
+  }, [
+    open,
+    route.assignedDriverId,
+    route.routeId,
+    initialDriverId,
+    authLoading,
+    currentUser,
+  ]);
 
   const selectedDriver = useMemo(
     () => drivers.find((driver) => driver.uid === selectedDriverId) || null,
@@ -125,6 +139,11 @@ export default function AssignDriverModal({
   const handleAssignDriver = async () => {
     if (!selectedDriver) {
       toast.error("Please select a driver");
+      return;
+    }
+
+    if (!currentUser) {
+      toast.error("Authentication required to assign drivers");
       return;
     }
 
@@ -169,9 +188,21 @@ export default function AssignDriverModal({
         "Driver assigned successfully! They will see this route in their mobile app.",
       );
       onClose();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error assigning driver:", error);
-      toast.error("Failed to assign driver");
+
+      // Provide specific error messages
+      if (error.code === "permission-denied") {
+        toast.error(
+          "Permission denied. Check Firestore rules allow admin writes to routes and drivers.",
+        );
+      } else if (error.message?.includes("insufficient permissions")) {
+        toast.error(
+          "Insufficient permissions. Admin user may not have write access.",
+        );
+      } else {
+        toast.error(error.message || "Failed to assign driver");
+      }
     } finally {
       setIsSubmitting(false);
     }

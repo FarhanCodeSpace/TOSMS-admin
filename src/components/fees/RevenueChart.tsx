@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { formatMonthDisplay } from "@/utils/dateHelpers";
 import { formatPKR } from "@/utils/formatters";
+import SkeletonLoader from "@/components/ui/SkeletonLoader";
 
 type RevenueData = {
   month: string;
@@ -22,9 +23,10 @@ type RevenueData = {
 
 type RevenueChartProps = {
   data: RevenueData[];
+  isLoading?: boolean;
 };
 
-export default function RevenueChart({ data }: RevenueChartProps) {
+export default function RevenueChart({ data, isLoading }: RevenueChartProps) {
   const chartData = useMemo(() => {
     return data.map((item) => ({
       name: formatMonthDisplay(item.month),
@@ -51,6 +53,36 @@ export default function RevenueChart({ data }: RevenueChartProps) {
     }
     return null;
   };
+
+  if (isLoading) {
+    return (
+      <div className="w-full rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-slate-900 mb-6">
+          Monthly Revenue Trend
+        </h3>
+        <div className="animate-pulse">
+          <div className="flex items-end justify-between gap-3 h-96 px-4">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div
+                key={index}
+                className="flex-1 flex flex-col items-center gap-2"
+              >
+                <div
+                  className="w-full bg-slate-200 rounded-t"
+                  style={{ height: `${Math.random() * 100 + 50}%` }}
+                />
+                <div className="h-3 w-12 bg-slate-200 rounded" />
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 flex justify-center gap-6">
+            <div className="h-4 w-24 bg-slate-200 rounded" />
+            <div className="h-4 w-24 bg-slate-200 rounded" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full rounded-lg border border-slate-200 bg-white p-6 shadow-sm">

@@ -33,6 +33,8 @@ import { formatTimeTo12Hour } from "@/utils/formatters";
 import Badge from "@/components/ui/Badge";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import AssignDriverModal from "@/components/routes/AssignDriverModal";
+import EmptyState from "@/components/ui/EmptyState";
+import SkeletonLoader from "@/components/ui/SkeletonLoader";
 import { deleteRoute } from "@/utils/firestoreHelpers";
 
 const RouteDetailMap = dynamic(
@@ -171,23 +173,28 @@ export default function RouteDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <p className="text-slate-600">Loading route details...</p>
+      <div className="space-y-4">
+        <SkeletonLoader rows={2} className="max-w-md" />
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <SkeletonLoader variant="card" />
+          <SkeletonLoader variant="card" />
+          <SkeletonLoader variant="card" />
+          <SkeletonLoader variant="card" />
+        </div>
+        <SkeletonLoader variant="table" rows={6} />
       </div>
     );
   }
 
   if (!route) {
     return (
-      <div className="py-12 text-center">
-        <p className="text-slate-600 mb-4">Route not found</p>
-        <Link
-          href="/dashboard/routes"
-          className="text-blue-600 hover:underline"
-        >
-          Back to Routes
-        </Link>
-      </div>
+      <EmptyState
+        icon={<AlertTriangle className="h-8 w-8" />}
+        title="Route not found"
+        subtitle="This route may have been deleted or you may not have access to it."
+        actionLabel="Back to Routes"
+        actionHref="/dashboard/routes"
+      />
     );
   }
 

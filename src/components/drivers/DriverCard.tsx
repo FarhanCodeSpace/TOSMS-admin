@@ -2,12 +2,13 @@
 
 import Image from "next/image";
 import { User } from "@/types";
-import { Image as ImageIcon, CheckCircle, XCircle } from "lucide-react";
+import { Image as ImageIcon, CheckCircle, XCircle, Trash2 } from "lucide-react";
 
 interface DriverCardProps {
   driver: User;
   onApprove: () => void;
   onReject: () => void;
+  onDelete: () => void;
   // eslint-disable-next-line no-unused-vars
   onShowImage: (...args: [string]) => void;
 }
@@ -25,6 +26,7 @@ export default function DriverCard({
   driver,
   onApprove,
   onReject,
+  onDelete,
   onShowImage,
 }: DriverCardProps) {
   const vehicleIcons: Record<string, string> = {
@@ -129,6 +131,13 @@ export default function DriverCard({
             >
               <XCircle className="h-4 w-4" />
               Reject
+            </button>
+            <button
+              onClick={onDelete}
+              className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-rose-200 text-rose-700 font-medium hover:bg-rose-50 transition"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
             </button>
           </div>
         </div>

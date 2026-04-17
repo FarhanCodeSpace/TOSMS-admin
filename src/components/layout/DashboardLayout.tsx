@@ -6,17 +6,24 @@ import Header from "./Header";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const sidebarWidth = isSidebarCollapsed ? 80 : 256;
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-transparent">
       <Sidebar
         collapsed={isSidebarCollapsed}
         onToggleCollapsed={() => setIsSidebarCollapsed((prev) => !prev)}
+        mobileOpen={isMobileMenuOpen}
+        onCloseMobile={() => setIsMobileMenuOpen(false)}
       />
-      <div className="min-h-screen" style={{ marginLeft: sidebarWidth }}>
-        <Header />
-        <main className="min-h-[calc(100vh-4rem)] p-6">{children}</main>
+
+      <div
+        className={`min-h-screen transition-all duration-300 ${
+          isSidebarCollapsed ? "lg:ml-20" : "lg:ml-64"
+        }`}
+      >
+        <Header onToggleMobileMenu={() => setIsMobileMenuOpen(true)} />
+        <main className="min-h-[calc(100vh-4rem)] p-4 md:p-6">{children}</main>
       </div>
     </div>
   );

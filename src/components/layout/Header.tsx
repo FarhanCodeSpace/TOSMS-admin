@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, ChevronRight, UserCircle } from "lucide-react";
+import { Bell, ChevronRight, Menu, UserCircle } from "lucide-react";
 import { usePathname } from "next/navigation";
 
 function buildBreadcrumb(pathname: string) {
@@ -11,13 +11,24 @@ function buildBreadcrumb(pathname: string) {
   );
 }
 
-export default function Header() {
+type HeaderProps = {
+  onToggleMobileMenu: () => void;
+};
+
+export default function Header({ onToggleMobileMenu }: HeaderProps) {
   const pathname = usePathname() ?? "/dashboard";
   const crumbs = buildBreadcrumb(pathname);
 
   return (
     <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-6 shadow-sm backdrop-blur-sm">
       <div className="flex items-center gap-3 text-sm text-slate-600">
+        <button
+          type="button"
+          onClick={onToggleMobileMenu}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-700 transition hover:bg-slate-50 lg:hidden"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
         {crumbs.map((crumb, index) => (
           <span key={crumb} className="inline-flex items-center gap-2">
             <span
