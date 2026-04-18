@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Bar,
-  BarChart,
+  Area,
+  AreaChart,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
@@ -20,7 +20,7 @@ import {
   limit,
 } from "firebase/firestore";
 import { addDays, format, subMonths } from "date-fns";
-import { MapPin, Users, GraduationCap, Bus } from "lucide-react";
+import { MapPin, Users, GraduationCap, Bus, Calendar } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { db } from "@/lib/firebase";
@@ -31,10 +31,13 @@ import {
   isVerifiedPayment,
   normalizeFeeAmount,
 } from "@/utils/feeHelpers";
-import StatsCard from "@/components/ui/StatsCard";
-import ActivityFeed from "@/components/ui/ActivityFeed";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
+import MetricTile from "@/components/ui/MetricTile";
+import ActivityFeed from "@/components/ui/ActivityFeed";
 import SkeletonLoader from "@/components/ui/SkeletonLoader";
+import { cn } from "@/lib/utils";
 
 const today = new Date();
 const todayString = format(today, "yyyy-MM-dd");
@@ -95,6 +98,19 @@ function getMonthLabels(count: number) {
       monthLabel: format(date, "MMM yy"),
     };
   });
+}
+
+function RevenueTooltip({ active, payload, label }: any) {
+  if (!active || !payload || !payload.length) return null;
+
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 shadow-xl">
+      <p className="text-sm font-semibold text-[var(--text)]">{label}</p>
+      <p className="mt-1 text-sm text-[var(--success)]">
+        Collected: {formatPKR(payload[0]?.value ?? 0)}
+      </p>
+    </div>
+  );
 }
 
 export default function DashboardPage() {
@@ -574,407 +590,498 @@ export default function DashboardPage() {
     });
   }, [availabilityRecords, routeRecords]);
 
+  const activeRoutesWithAssignedDriver = useMemo(
+    () =>
+      routeRecords.filter((route) => Boolean(route.assignedDriverId)).length,
+    [routeRecords],
+  );
+
+  const routesIndicatorPercent =
+    activeRoutesCount > 0
+      ? Math.round((activeRoutesWithAssignedDriver / activeRoutesCount) * 100)
+      : 0;
+
+  const driversIndicatorPercent =
+    activeDriversCount + pendingDriversCount > 0
+      ? Math.round(
+          (activeDriversCount / (activeDriversCount + pendingDriversCount)) *
+            100,
+        )
+      : 0;
+
+  const studentsIndicatorPercent =
+    totalStudentsCount > 0
+      ? Math.round(
+          ((totalStudentsCount - unassignedStudentsCount) /
+            totalStudentsCount) *
+            100,
+        )
+      : 0;
+
+  const ridesIndicatorPercent =
+    activeRidesCount + scheduledRidesCount > 0
+      ? Math.round(
+          (activeRidesCount / (activeRidesCount + scheduledRidesCount)) * 100,
+        )
+      : 0;
+
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-4 pb-12 pt-6 sm:px-6 lg:px-8">
-      {/* Page Header */}
-      <section>
-        <div className="flex items-baseline justify-between">
+    <div className="min-h-screen bg-[var(--background)] animate-fade-in">
+      <div className="mx-auto max-w-7xl space-y-8 px-4 pb-12 pt-6 sm:px-6 lg:px-8">
+        {/* Page Header */}
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-2">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-            <p className="mt-1 text-sm text-gray-600">{todayDisplay}</p>
-          </div>
-          <div className="flex items-center gap-2 rounded-full bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700">
-            <span className="h-2 w-2 rounded-full bg-green-500" />
-            Live
-          </div>
-        </div>
-      </section>
-
-      {/* Stats Cards Row */}
-      <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <StatsCard
-          title="Active Routes"
-          value={activeRoutesCount}
-          label="Routes currently operating"
-          icon={<MapPin className="h-5 w-5" />}
-          iconBg="#DBEAFE"
-          iconColor="#1A3C5E"
-          footer={
-            <p className="text-sm font-semibold text-green-700">
-              All operational
-            </p>
-          }
-        />
-        <StatsCard
-          title="Total Drivers"
-          value={activeDriversCount}
-          label="Drivers currently active"
-          icon={<Users className="h-5 w-5" />}
-          iconBg="#FEF3C7"
-          iconColor="#92400E"
-          footer={
-            <Link
-              href={{
-                pathname: "/dashboard/drivers",
-                query: { tab: "pending" },
-              }}
-              className="inline-flex rounded-full bg-amber-100 px-3 py-1 text-sm font-semibold text-amber-800 transition hover:bg-amber-200"
-            >
-              {pendingDriversCount} pending approval
-            </Link>
-          }
-        />
-        <StatsCard
-          title="Total Students"
-          value={totalStudentsCount}
-          label="Students enrolled"
-          icon={<GraduationCap className="h-5 w-5" />}
-          iconBg="#E2E8F0"
-          iconColor="#1A3C5E"
-          footer={
-            <p className="text-sm text-gray-500">
-              {unassignedStudentsCount} unassigned
-            </p>
-          }
-        />
-        <StatsCard
-          title="Active Rides Today"
-          value={activeRidesCount}
-          label="Rides active today"
-          icon={<Bus className="h-5 w-5" />}
-          iconBg="#DBEAFE"
-          iconColor="#1A3C5E"
-          footer={
-            <p className="text-sm font-semibold text-blue-700">
-              {scheduledRidesCount} scheduled
-            </p>
-          }
-        />
-      </section>
-
-      {/* Today's Availability Overview */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">
-              {availabilityView === "today"
-                ? "Today's Availability Overview"
-                : "Tomorrow's Availability Overview"}
-            </h2>
-            <p className="mt-1 text-sm text-gray-600">
-              Route availability summary for {availabilityDisplay}
+            <h1 className="text-4xl font-bold tracking-tight text-[var(--text)]">
+              Dashboard
+            </h1>
+            <p className="mt-2 text-sm text-[var(--text-muted)]">
+              {todayDisplay}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-1">
-              <button
-                type="button"
-                onClick={() => setAvailabilityView("today")}
-                className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
-                  availabilityView === "today"
-                    ? "bg-white text-slate-900 shadow-sm"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Today
-              </button>
-              <button
-                type="button"
-                onClick={() => setAvailabilityView("tomorrow")}
-                className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
-                  availabilityView === "tomorrow"
-                    ? "bg-white text-slate-900 shadow-sm"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Tomorrow
-              </button>
-            </div>
-            <div className="flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700">
-              <span className="h-2 w-2 rounded-full bg-green-500" />
+          <div className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-2 shadow-sm">
+            <span className="h-2 w-2 rounded-full bg-[var(--success)] animate-pulse-dot" />
+            <span className="text-sm font-semibold text-[var(--success)]">
               Live
-            </div>
+            </span>
+            <span className="text-xs text-[var(--text-muted)]">
+              updates enabled
+            </span>
           </div>
         </div>
 
-        {isAvailabilityLoading ? (
-          <div className="space-y-3">
-            <SkeletonLoader rows={1} className="h-4 w-1/3" />
-            <div className="overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-200 bg-gray-50">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">
-                      Route Name
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">
-                      Driver Status
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">
-                      Available
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">
-                      Not Available
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">
-                      No Response
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600">
-                      Response Rate
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {Array.from({ length: 3 }).map((_, index) => (
-                    <tr key={index}>
-                      <td className="px-4 py-4">
-                        <SkeletonLoader className="h-4 w-28" />
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="h-6 w-36 animate-pulse rounded-full bg-slate-200" />
-                      </td>
-                      <td className="px-4 py-4">
-                        <SkeletonLoader className="mx-auto h-4 w-8" />
-                      </td>
-                      <td className="px-4 py-4">
-                        <SkeletonLoader className="mx-auto h-4 w-8" />
-                      </td>
-                      <td className="px-4 py-4">
-                        <SkeletonLoader className="mx-auto h-4 w-8" />
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="ml-auto h-4 w-20 animate-pulse rounded bg-slate-200" />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : availabilitySummary.length === 0 ? (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
-            No active routes available for this date.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">
-                    Route Name
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">
-                    Driver Status
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">
-                    Available
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">
-                    Not Available
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600">
-                    No Response
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600">
-                    Response Rate
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {availabilitySummary.map((route) => (
-                  <tr key={route.routeId} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                      {route.name}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge status={route.driverStatus}>
-                        {route.driverLabel}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 text-center text-sm text-green-700 font-semibold">
-                      {route.availableCount}
-                    </td>
-                    <td className="px-4 py-3 text-center text-sm text-red-700 font-semibold">
-                      {route.notAvailableCount}
-                    </td>
-                    <td className="px-4 py-3 text-center text-sm text-gray-500">
-                      {route.noResponseCount}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <div className="h-2 w-16 overflow-hidden rounded-full bg-gray-100">
-                          <div
-                            className="h-full rounded-full bg-blue-500"
-                            style={{ width: `${route.responseRate}%` }}
-                          />
-                        </div>
-                        <span className="text-xs font-semibold text-gray-600">
-                          {route.responseRate}%
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+        {/* Stats Cards Row */}
+        <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4 animate-slide-up">
+          <MetricTile
+            title="Active Routes"
+            value={activeRoutesCount}
+            icon={<MapPin className="h-5 w-5" />}
+            subtitle={`${activeRoutesWithAssignedDriver} with assigned driver`}
+            trend={activeRoutesCount > 0 ? "up" : "neutral"}
+            indicatorPercent={routesIndicatorPercent}
+          />
+          <MetricTile
+            title="Total Drivers"
+            value={activeDriversCount}
+            icon={<Users className="h-5 w-5" />}
+            subtitle={`${pendingDriversCount} pending approval`}
+            trend={pendingDriversCount > 0 ? "down" : "up"}
+            indicatorPercent={driversIndicatorPercent}
+          />
+          <MetricTile
+            title="Total Students"
+            value={totalStudentsCount}
+            icon={<GraduationCap className="h-5 w-5" />}
+            subtitle={`${unassignedStudentsCount} unassigned`}
+            trend={unassignedStudentsCount > 0 ? "down" : "up"}
+            indicatorPercent={studentsIndicatorPercent}
+          />
+          <MetricTile
+            title="Active Rides"
+            value={activeRidesCount}
+            icon={<Bus className="h-5 w-5" />}
+            subtitle={`${scheduledRidesCount} scheduled`}
+            trend={activeRidesCount > 0 ? "up" : "neutral"}
+            indicatorPercent={ridesIndicatorPercent}
+          />
+        </section>
 
-      {/* Two Column Layout: Fee Collection & Recent Activity */}
-      <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        {/* Fee Collection */}
-        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-6 flex items-start justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">
-                Fee Collection This Month
-              </h3>
-              <p className="mt-1 text-sm text-gray-600">
-                {format(today, "MMMM yyyy")}
-              </p>
-            </div>
-            <Link
-              href={{ pathname: "/dashboard/fees", query: { tab: "pending" } }}
-              className="inline-flex rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-200"
-            >
-              Review Now
-            </Link>
-          </div>
-
-          {/* Fee Summary Cards */}
-          {isFeeCardLoading ? (
-            <div className="mb-6 grid gap-3 sm:grid-cols-3">
-              <SkeletonLoader variant="card" className="rounded-lg p-4" />
-              <SkeletonLoader variant="card" className="rounded-lg p-4" />
-              <SkeletonLoader variant="card" className="rounded-lg p-4" />
-            </div>
-          ) : (
-            <div className="mb-6 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg bg-gray-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">
-                  Total Collected
-                </p>
-                <p className="mt-2 text-2xl font-bold text-gray-900">
-                  {formatPKR(feeTotalCollected)}
+        {/* Availability Overview */}
+        <div className="animate-slide-up" style={{ animationDelay: "100ms" }}>
+          <Card variant="elevated" className="w-full">
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-lg font-semibold tracking-tight text-[var(--text)]">
+                  {availabilityView === "today"
+                    ? "Today's Availability"
+                    : "Tomorrow's Availability"}
+                </h2>
+                <p className="text-sm text-[var(--text-muted)] mt-1">
+                  {availabilityDisplay}
                 </p>
               </div>
-              <div className="rounded-lg bg-amber-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
-                  Pending Reviews
-                </p>
-                <p className="mt-2 text-2xl font-bold text-amber-700">
-                  {feePendingCount}
-                </p>
-              </div>
-              <div className="rounded-lg bg-green-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-green-700">
-                  Verified
-                </p>
-                <p className="mt-2 text-2xl font-bold text-green-700">
-                  {feeVerifiedCount}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Fee Chart */}
-          {isFeeCardLoading ? (
-            <div className="h-48 rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <div className="animate-pulse h-full">
-                <div className="flex h-full items-end gap-3">
-                  {Array.from({ length: 6 }).map((_, index) => (
-                    <div key={index} className="flex-1 space-y-2">
-                      <div
-                        className="w-full rounded-t bg-slate-200"
-                        style={{ height: `${25 + ((index * 13) % 45)}%` }}
-                      />
-                      <div className="mx-auto h-2 w-8 rounded bg-slate-200" />
-                    </div>
-                  ))}
+              <div className="flex items-center gap-2">
+                <div className="inline-flex items-center rounded-full border border-[var(--border)] p-1 bg-[var(--surface-secondary)]">
+                  <button
+                    type="button"
+                    onClick={() => setAvailabilityView("today")}
+                    className={`rounded-full px-4 py-2 text-xs font-semibold transition-all ${
+                      availabilityView === "today"
+                        ? "bg-[var(--primary)] text-white shadow-sm"
+                        : "text-[var(--text-muted)] hover:text-[var(--text)]"
+                    }`}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAvailabilityView("tomorrow")}
+                    className={`rounded-full px-4 py-2 text-xs font-semibold transition-all ${
+                      availabilityView === "tomorrow"
+                        ? "bg-[var(--primary)] text-white shadow-sm"
+                        : "text-[var(--text-muted)] hover:text-[var(--text)]"
+                    }`}
+                  >
+                    Tomorrow
+                  </button>
                 </div>
               </div>
             </div>
-          ) : (
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={feeChartData}
-                  margin={{ top: 5, right: 10, left: -20, bottom: 0 }}
+
+            {isAvailabilityLoading ? (
+              <div className="space-y-3">
+                <SkeletonLoader rows={1} className="h-4 w-1/3" />
+                <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-[var(--surface-secondary)] border-b border-[var(--border)]">
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--text-secondary)]">
+                          Route
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-[var(--text-secondary)]">
+                          Driver
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-[var(--text-secondary)]">
+                          Available
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-[var(--text-secondary)]">
+                          Unavailable
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-[var(--text-secondary)]">
+                          Rate
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.from({ length: 3 }).map((_, index) => (
+                        <tr
+                          key={index}
+                          className="border-b border-[var(--border)]"
+                        >
+                          <td className="px-4 py-4">
+                            <SkeletonLoader className="h-4 w-28" />
+                          </td>
+                          <td className="px-4 py-4">
+                            <SkeletonLoader className="h-6 w-36 rounded-full" />
+                          </td>
+                          <td className="px-4 py-4">
+                            <SkeletonLoader className="mx-auto h-4 w-8" />
+                          </td>
+                          <td className="px-4 py-4">
+                            <SkeletonLoader className="mx-auto h-4 w-8" />
+                          </td>
+                          <td className="px-4 py-4">
+                            <SkeletonLoader className="ml-auto h-4 w-20" />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : availabilitySummary.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface-secondary)] p-8 text-center">
+                <p className="text-sm text-[var(--text-muted)]">
+                  No active routes available for this date.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-[var(--border)]">
+                <table className="w-full min-w-[760px]">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="bg-[var(--surface-secondary)] border-b border-[var(--border)]">
+                      <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                        Route Name
+                      </th>
+                      <th className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                        Driver Status
+                      </th>
+                      <th className="px-5 py-4 text-center text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                        Available
+                      </th>
+                      <th className="px-5 py-4 text-center text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                        Unavailable
+                      </th>
+                      <th className="px-5 py-4 text-center text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                        No Response
+                      </th>
+                      <th className="px-5 py-4 text-right text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                        Response Rate
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {availabilitySummary.map((route, idx) => (
+                      <tr
+                        key={route.routeId}
+                        className={cn(
+                          "border-b border-[var(--border)] transition-colors hover:bg-[var(--surface-secondary)]",
+                          idx % 2 === 1 && "bg-[var(--surface-secondary)]/35",
+                        )}
+                      >
+                        <td className="px-5 py-4 text-sm font-medium text-[var(--text)]">
+                          {route.name}
+                        </td>
+                        <td className="px-5 py-4">
+                          <Badge status={route.driverStatus}>
+                            {route.driverLabel}
+                          </Badge>
+                        </td>
+                        <td className="px-5 py-4 text-center text-sm font-semibold text-[var(--success)]">
+                          {route.availableCount}
+                        </td>
+                        <td className="px-5 py-4 text-center text-sm font-semibold text-[var(--error)]">
+                          {route.notAvailableCount}
+                        </td>
+                        <td className="px-5 py-4 text-center text-sm text-[var(--text-muted)]">
+                          {route.noResponseCount}
+                        </td>
+                        <td className="px-5 py-4 text-right">
+                          <div className="flex items-center justify-end gap-3">
+                            <div className="h-2.5 w-28 overflow-hidden rounded-full bg-[var(--surface-secondary)]">
+                              <div
+                                className="h-full rounded-full bg-gradient-to-r from-[var(--primary)] via-[var(--accent)] to-[var(--success)]"
+                                style={{ width: `${route.responseRate}%` }}
+                              />
+                            </div>
+                            <span className="text-xs font-semibold text-[var(--text-secondary)] min-w-fit">
+                              {route.responseRate}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(340px,1fr)]">
+          {/* Fee Collection */}
+          <div className="animate-slide-up" style={{ animationDelay: "200ms" }}>
+            <Card variant="elevated">
+              <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold tracking-tight text-[var(--text)]">
+                    Fee Collection
+                  </h3>
+                  <p className="text-sm text-[var(--text-muted)] mt-1">
+                    {format(today, "MMMM yyyy")}
+                  </p>
+                </div>
+                <Link
+                  href={{
+                    pathname: "/dashboard/fees",
+                    query: { tab: "pending" },
+                  }}
                 >
-                  <CartesianGrid stroke="#E5E7EB" vertical={false} />
-                  <XAxis
-                    dataKey="month"
-                    tickLine={false}
-                    axisLine={false}
-                    tick={{ fontSize: 12 }}
-                  />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={false}
-                    tick={{ fontSize: 12 }}
-                  />
-                  <Tooltip formatter={(value: number) => formatPKR(value)} />
-                  <Bar dataKey="total" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+                  <Button variant="secondary" size="sm">
+                    Review pending
+                  </Button>
+                </Link>
+              </div>
+
+              {isFeeCardLoading ? (
+                <div className="grid gap-4 sm:grid-cols-3 mb-6">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <SkeletonLoader
+                      key={i}
+                      variant="card"
+                      className="rounded-lg p-4 h-24"
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-3 mb-6">
+                  <div className="rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--primary)]/10 to-[var(--surface)] p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                      Total Collected
+                    </p>
+                    <p className="mt-3 text-2xl font-bold text-[var(--primary)]">
+                      {formatPKR(feeTotalCollected)}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--warning)]/10 to-[var(--surface)] p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--warning)]">
+                      Pending Reviews
+                    </p>
+                    <p className="mt-3 text-2xl font-bold text-[var(--warning)]">
+                      {feePendingCount}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--success)]/10 to-[var(--surface)] p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--success)]">
+                      Verified
+                    </p>
+                    <p className="mt-3 text-2xl font-bold text-[var(--success)]">
+                      {feeVerifiedCount}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {isFeeCardLoading ? (
+                <div className="h-72 rounded-2xl border border-[var(--border)] bg-[var(--surface-secondary)] p-4">
+                  <div className="animate-pulse h-full space-y-4">
+                    <div className="h-4 w-36 rounded bg-[var(--surface)]" />
+                    <div className="h-[240px] rounded-2xl bg-[var(--surface)]/80" />
+                  </div>
+                </div>
+              ) : (
+                <div className="h-72 rounded-2xl border border-[var(--border)] bg-[var(--surface-secondary)]/40 p-3">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={feeChartData}
+                      margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                    >
+                      <defs>
+                        <linearGradient
+                          id="revenueGradient"
+                          x1="0"
+                          y1="0"
+                          x2="0"
+                          y2="1"
+                        >
+                          <stop
+                            offset="5%"
+                            stopColor="var(--primary)"
+                            stopOpacity={0.32}
+                          />
+                          <stop
+                            offset="95%"
+                            stopColor="var(--primary)"
+                            stopOpacity={0.02}
+                          />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid
+                        stroke="var(--border)"
+                        strokeDasharray="4 6"
+                        vertical={false}
+                      />
+                      <XAxis
+                        dataKey="month"
+                        tick={{ fill: "var(--text-muted)", fontSize: 12 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tick={{ fill: "var(--text-muted)", fontSize: 12 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <Tooltip content={<RevenueTooltip />} />
+                      <Area
+                        type="monotone"
+                        dataKey="total"
+                        stroke="var(--primary)"
+                        strokeWidth={3}
+                        fill="url(#revenueGradient)"
+                        dot={{ r: 3, fill: "var(--primary)" }}
+                        activeDot={{
+                          r: 5,
+                          stroke: "var(--surface)",
+                          strokeWidth: 2,
+                        }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </Card>
+          </div>
+
+          <div className="space-y-6 xl:sticky xl:top-24 self-start">
+            <div
+              className="animate-slide-up"
+              style={{ animationDelay: "300ms" }}
+            >
+              <ActivityFeed
+                title="Recent Activity"
+                items={recentPayments.map((payment) => ({
+                  id: payment.id,
+                  title: `${payment.studentName} submitted ${payment.month} fee`,
+                  status: payment.paymentStatus,
+                  date: payment.submittedAt,
+                }))}
+                emptyText="No recent activity found."
+              />
             </div>
-          )}
-        </section>
+          </div>
+        </div>
 
-        {/* Recent Activity */}
-        <ActivityFeed
-          title="Recent Activity"
-          viewAllHref={{
-            pathname: "/dashboard/fees",
-            query: { tab: "pending" },
-          }}
-          items={recentPayments.map((payment) => ({
-            id: payment.id,
-            title: `${payment.studentName} submitted ${payment.month} fee via ${payment.paymentMethod}`,
-            status: payment.paymentStatus,
-            date: payment.submittedAt,
-          }))}
-          emptyText="No recent activity found."
-        />
+        <div className="animate-slide-up" style={{ animationDelay: "250ms" }}>
+          <Card variant="elevated">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-lg font-semibold tracking-tight text-[var(--text)]">
+                  Quick Actions
+                </h3>
+                <p className="text-sm text-[var(--text-muted)] mt-1">
+                  Fast access to the most common admin actions
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Link
+                href={{ pathname: "/dashboard/routes", query: { create: "1" } }}
+              >
+                <Button
+                  variant="primary"
+                  size="md"
+                  className="w-full justify-start"
+                  leftIcon={<MapPin className="h-4 w-4" />}
+                >
+                  Create Route
+                </Button>
+              </Link>
+              <Link
+                href={{ pathname: "/dashboard/rides", query: { create: "1" } }}
+              >
+                <Button
+                  variant="primary"
+                  size="md"
+                  className="w-full justify-start"
+                  leftIcon={<Bus className="h-4 w-4" />}
+                >
+                  Create Ride
+                </Button>
+              </Link>
+              <Link
+                href={{
+                  pathname: "/dashboard/drivers",
+                  query: { tab: "pending" },
+                }}
+              >
+                <Button
+                  variant="primary"
+                  size="md"
+                  className="w-full justify-start"
+                  leftIcon={<Users className="h-4 w-4" />}
+                >
+                  Approve Drivers
+                  {pendingDriversCount > 0 && (
+                    <Badge variant="warning" className="ml-auto">
+                      {pendingDriversCount}
+                    </Badge>
+                  )}
+                </Button>
+              </Link>
+              <Link href={{ pathname: "/dashboard/availability" }}>
+                <Button
+                  variant="primary"
+                  size="md"
+                  className="w-full justify-start"
+                  leftIcon={<Calendar className="h-4 w-4" />}
+                >
+                  View Availability
+                </Button>
+              </Link>
+            </div>
+          </Card>
+        </div>
       </div>
-
-      {/* Quick Actions Row */}
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Link
-          href={{ pathname: "/dashboard/routes", query: { create: "1" } }}
-          className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
-        >
-          <span aria-hidden>+</span>
-          <span>Create Route</span>
-        </Link>
-        <Link
-          href={{ pathname: "/dashboard/rides", query: { create: "1" } }}
-          className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
-        >
-          <span aria-hidden>+</span>
-          <span>Create Ride</span>
-        </Link>
-        <Link
-          href={{ pathname: "/dashboard/drivers", query: { tab: "pending" } }}
-          className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
-        >
-          <span aria-hidden>+</span>
-          <span>Approve Drivers</span>
-          {pendingDriversCount > 0 && (
-            <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
-              {pendingDriversCount}
-            </span>
-          )}
-        </Link>
-        <Link
-          href={{ pathname: "/dashboard/availability" }}
-          className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 transition hover:bg-slate-50"
-        >
-          <span aria-hidden>+</span>
-          <span>View Availability</span>
-        </Link>
-      </section>
     </div>
   );
 }

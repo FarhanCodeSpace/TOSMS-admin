@@ -3,7 +3,61 @@
 @tailwind utilities;
 
 :root {
+  --background: #f8fafc;
+  --surface: #ffffff;
+  --surface-secondary: #f1f5f9;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --primary: #1a3c5e;
+  --primary-light: #eef4ff;
+  --accent: #f5a623;
+  --accent-light: #fff7ed;
+  --success: #16a34a;
+  --success-light: #f0fff4;
+  --warning: #f59e0b;
+  --warning-light: #fffbeb;
+  --error: #dc2626;
+  --error-light: #fef2f2;
+  --text: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --input-bg: #ffffff;
+  --input-border: #e2e8f0;
+  --search-bg: transparent;
+  --search-border: transparent;
+  --scrollbar-track: #e2e8f0;
+  --scrollbar-thumb: #94a3b8;
+  --scrollbar-thumb-hover: #64748b;
   color-scheme: light;
+}
+
+.dark {
+  --background: #0f172a;
+  --surface: #1e293b;
+  --surface-secondary: #334155;
+  --border: #334155;
+  --border-strong: #475569;
+  --primary: #3b82f6;
+  --primary-light: #1e3a5f;
+  --accent: #f5a623;
+  --accent-light: #2d1f00;
+  --success: #22c55e;
+  --success-light: #052e16;
+  --warning: #f59e0b;
+  --warning-light: #1c1200;
+  --error: #ef4444;
+  --error-light: #2d0000;
+  --text: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --input-bg: #1a3a52;
+  --input-border: #2a5a7f;
+  --search-bg: transparent;
+  --search-border: transparent;
+  --scrollbar-track: #1e293b;
+  --scrollbar-thumb: #475569;
+  --scrollbar-thumb-hover: #64748b;
+  color-scheme: dark;
 }
 
 html {
@@ -11,7 +65,94 @@ html {
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased font-sans;
+  @apply antialiased font-sans;
+  background-color: var(--background);
+  color: var(--text);
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+html,
+body {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    var(--scrollbar-thumb),
+    var(--scrollbar-thumb-hover)
+  );
+  border-radius: 999px;
+  border: 2px solid var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+.dark .bg-white,
+.dark .bg-slate-50,
+.dark .bg-slate-100,
+.dark .bg-slate-200,
+.dark .bg-gray-50,
+.dark .bg-gray-100 {
+  background-color: var(--surface) !important;
+}
+
+.dark .text-slate-900,
+.dark .text-slate-800,
+.dark .text-slate-700,
+.dark .text-slate-600,
+.dark .text-slate-500,
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-gray-700,
+.dark .text-gray-600,
+.dark .text-gray-500 {
+  color: var(--text) !important;
+}
+
+.dark .border-slate-100,
+.dark .border-slate-200,
+.dark .border-slate-300,
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300 {
+  border-color: var(--border) !important;
+}
+
+.dark .shadow-sm,
+.dark .shadow,
+.dark .shadow-md {
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.25) !important;
+}
+
+.dark .bg-slate-900,
+.dark .bg-gray-900 {
+  background-color: var(--surface) !important;
+}
+
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-slate-100:hover {
+  background-color: var(--surface-secondary) !important;
 }
 
 * {
@@ -23,6 +164,48 @@ button,
 textarea,
 select {
   font: inherit;
+}
+
+input,
+textarea,
+select {
+  color: var(--text);
+  background-color: var(--input-bg) !important;
+  border: 1px solid var(--input-border) !important;
+}
+
+/* Ensure inputs inherit text color from theme */
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted) !important;
+  opacity: 1;
+}
+
+/* Transparent input backgrounds - for search bars, etc */
+input.bg-transparent,
+textarea.bg-transparent,
+select.bg-transparent {
+  background-color: transparent !important;
+  border: none !important;
+}
+
+/* Date/time inputs styling */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] {
+  cursor: pointer;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--text-secondary) !important;
+  opacity: 1;
+}
+
+.dark input[type="date"]::-webkit-datetime-edit,
+.dark input[type="time"]::-webkit-datetime-edit,
+.dark input[type="datetime-local"]::-webkit-datetime-edit {
+  color: var(--text-secondary);
 }
 
 /* ─── PRINT STYLES ─────────────────────────────────────── */

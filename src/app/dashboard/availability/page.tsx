@@ -8,7 +8,6 @@ import {
   onSnapshot,
   query,
   serverTimestamp,
-  setDoc,
   where,
   writeBatch,
   Timestamp,
@@ -17,20 +16,20 @@ import { addDays, format, formatDistanceToNow, isSameDay } from "date-fns";
 import {
   AlertTriangle,
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Clock3,
+  CircleCheck,
+  ClipboardList,
+  Route as RouteIcon,
   Printer,
   RefreshCw,
   XCircle,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
 import { Availability, Route, User } from "@/types";
-import { getAvailabilityDocId } from "@/utils/dateHelpers";
 import RouteAvailabilityCard from "@/components/availability/RouteAvailabilityCard";
 import { StudentAvailabilityRowData } from "@/components/availability/StudentAvailabilityRow";
 import PrintableAvailabilityReport from "@/components/availability/PrintableAvailabilityReport";
@@ -89,6 +88,11 @@ function formatDateHeaderLabel(selectedDate: Date): string {
   }
 
   return format(selectedDate, "EEEE, MMMM d, yyyy");
+}
+
+function isLogoutPermissionError(error: unknown): boolean {
+  const code = (error as { code?: string } | undefined)?.code;
+  return code === "permission-denied" && !auth.currentUser;
 }
 
 export default function AvailabilityPage() {
@@ -170,6 +174,10 @@ export default function AvailabilityPage() {
 
       setLastUpdated(new Date());
     } catch (error) {
+      if (isLogoutPermissionError(error)) {
+        return;
+      }
+
       console.error("Error loading availability report:", error);
       toast.error("Failed to load availability report");
     } finally {
@@ -211,6 +219,7 @@ export default function AvailabilityPage() {
         markLoaded();
       },
       (error) => {
+        if (isLogoutPermissionError(error)) return;
         console.error("Error subscribing routes:", error);
         toast.error("Live route updates failed");
       },
@@ -234,6 +243,7 @@ export default function AvailabilityPage() {
         markLoaded();
       },
       (error) => {
+        if (isLogoutPermissionError(error)) return;
         console.error("Error subscribing users:", error);
         toast.error("Live user updates failed");
       },
@@ -258,6 +268,7 @@ export default function AvailabilityPage() {
         markLoaded();
       },
       (error) => {
+        if (isLogoutPermissionError(error)) return;
         console.error("Error subscribing availability:", error);
         toast.error("Live availability updates failed");
       },
@@ -494,42 +505,61 @@ export default function AvailabilityPage() {
     try {
       setSendingReminderRouteId(report.route.routeId);
 
+      const existingNoResponseRecords = availabilityRecords.filter(
+        (record) =>
+          record.routeId === report.route.routeId &&
+          record.date === selectedDateKey &&
+          record.role === "student" &&
+          report.noResponseStudentIds.includes(record.userId),
+      );
+
+      if (!existingNoResponseRecords.length) {
+        toast("No existing availability records to update for reminders");
+        return;
+      }
+
       const batch = writeBatch(db);
 
-      report.noResponseStudentIds.forEach((studentId) => {
-        const student = report.students.find(
-          (item) => item.userId === studentId,
-        );
-        const docId = getAvailabilityDocId(studentId, selectedDateKey);
+      existingNoResponseRecords.forEach((record) => {
+        const availabilityId =
+          record.availabilityId || `${record.userId}_${record.date}`;
 
-        batch.set(
-          doc(db, COLLECTIONS.AVAILABILITY, docId),
-          {
-            availabilityId: docId,
-            userId: studentId,
-            userName: student?.name || "Student",
-            routeId: report.route.routeId,
-            date: selectedDateKey,
-            role: "student",
-            reminderSent: true,
-            reminderSentAt: serverTimestamp(),
-          },
-          { merge: true },
-        );
+        batch.update(doc(db, COLLECTIONS.AVAILABILITY, availabilityId), {
+          reminderSent: true,
+          reminderSentAt: serverTimestamp(),
+        });
       });
 
       await batch.commit();
-      toast.success(
-        `Reminder sent to ${report.noResponseStudentIds.length} non-respondent students`,
-      );
+
+      const skippedCount =
+        report.noResponseStudentIds.length - existingNoResponseRecords.length;
+      if (skippedCount > 0) {
+        toast.success(
+          `Reminder updated for ${existingNoResponseRecords.length} students (${skippedCount} had no record)`,
+        );
+      } else {
+        toast.success(
+          `Reminder sent to ${existingNoResponseRecords.length} non-respondent students`,
+        );
+      }
 
       if (!liveUpdates) {
         setIsRefreshing(true);
         await loadSnapshotDataOnce(selectedDateKey);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error sending reminders:", error);
-      toast.error("Failed to send reminders");
+
+      if (error?.code === "permission-denied") {
+        toast.error(
+          "Permission denied. Update Firestore rules to allow admin reminder writes on availability records.",
+        );
+      } else if (error?.message?.includes("insufficient permissions")) {
+        toast.error("Insufficient Firestore permissions for reminder updates.");
+      } else {
+        toast.error("Failed to send reminders");
+      }
     } finally {
       setSendingReminderRouteId(null);
     }
@@ -553,26 +583,17 @@ export default function AvailabilityPage() {
 
   return (
     <section className="space-y-6">
-      {summary.routesNeedAttention > 0 ? (
-        <div className="sticky top-0 z-30 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 print:hidden">
-          ⚠️ Action Required: {summary.routesNeedAttention} routes have no
-          driver available tomorrow. Please arrange backup drivers.
-        </div>
-      ) : null}
-
-      {deadlinePassed ? (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 print:hidden">
-          Availability marking deadline has passed. This is the final report for
-          tomorrow.
-        </div>
-      ) : null}
-
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm print:hidden">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-5">
           <div className="space-y-3">
-            <h1 className="text-3xl font-bold text-slate-900">
-              Availability Reports
-            </h1>
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900">
+                Route Availability
+              </h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Daily readiness overview for drivers and students.
+              </p>
+            </div>
 
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -599,7 +620,7 @@ export default function AvailabilityPage() {
               </button>
               <button
                 onClick={() => setSelectedDate(new Date())}
-                className="rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-50"
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
               >
                 Today
               </button>
@@ -608,8 +629,8 @@ export default function AvailabilityPage() {
 
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-end gap-3">
-              <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-700">
-                <span>Live Updates</span>
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
+                <span>Live</span>
                 <button
                   role="switch"
                   aria-checked={liveUpdates}
@@ -636,7 +657,7 @@ export default function AvailabilityPage() {
                     size={16}
                     className={isRefreshing ? "animate-spin" : ""}
                   />
-                  Manual Refresh
+                  Refresh
                 </button>
               ) : null}
 
@@ -645,19 +666,53 @@ export default function AvailabilityPage() {
                 className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
               >
                 <Printer size={16} />
-                Print/Export Full Report
+                Print Report
               </button>
             </div>
 
             <p className="text-right text-xs text-slate-500">
-              Last updated:{" "}
+              Updated{" "}
               {lastUpdated
                 ? formatDistanceToNow(lastUpdated, { addSuffix: true })
-                : "Waiting for first update"}
+                : "just now"}
             </p>
           </div>
         </div>
       </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3 print:hidden">
+        <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">
+          <CircleCheck size={18} className="shrink-0" />
+          <p className="text-sm font-semibold">
+            {summary.routesReady} of {summary.totalRoutes} routes ready
+          </p>
+        </div>
+        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800">
+          <ClipboardList size={18} className="shrink-0" />
+          <p className="text-sm font-semibold">
+            {summary.noResponse} pending responses
+          </p>
+        </div>
+        <div
+          className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm font-semibold ${
+            summary.routesNeedAttention > 0
+              ? "border-rose-200 bg-rose-50 text-rose-800"
+              : "border-slate-200 bg-slate-50 text-slate-700"
+          }`}
+        >
+          <AlertTriangle size={18} className="shrink-0" />
+          {summary.routesNeedAttention > 0
+            ? `${summary.routesNeedAttention} routes require action`
+            : "No route-level alerts"}
+        </div>
+      </div>
+
+      {deadlinePassed ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800 print:hidden">
+          Submission window for tomorrow has closed. This report now reflects
+          final responses.
+        </div>
+      ) : null}
 
       <PrintableAvailabilityReport
         selectedDate={selectedDate}
@@ -668,33 +723,23 @@ export default function AvailabilityPage() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 print:hidden">
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-          <p className="text-sm font-medium text-emerald-700">
-            Total Available
-          </p>
+          <p className="text-sm font-medium text-emerald-700">Available</p>
           <p className="mt-2 text-3xl font-bold text-emerald-800">
             {summary.available}
           </p>
-          <p className="mt-1 text-xs text-emerald-700">
-            Students + Drivers combined
-          </p>
+          <p className="mt-1 text-xs text-emerald-700">Students and drivers</p>
         </div>
 
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 shadow-sm">
-          <p className="text-sm font-medium text-rose-700">
-            Total Not Available
-          </p>
+          <p className="text-sm font-medium text-rose-700">Not Available</p>
           <p className="mt-2 text-3xl font-bold text-rose-800">
             {summary.notAvailable}
           </p>
-          <p className="mt-1 text-xs text-rose-700">
-            Students + Drivers combined
-          </p>
+          <p className="mt-1 text-xs text-rose-700">Students and drivers</p>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-slate-100 p-4 shadow-sm">
-          <p className="text-sm font-medium text-slate-700">
-            Total No Response
-          </p>
+          <p className="text-sm font-medium text-slate-700">No Response</p>
           <p className="mt-2 text-3xl font-bold text-slate-800">
             {summary.noResponse}
           </p>
@@ -704,23 +749,23 @@ export default function AvailabilityPage() {
           {summary.highNoResponse ? (
             <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
               <AlertTriangle size={12} />
-              High no-response rate
+              Elevated no-response rate
             </p>
           ) : null}
         </div>
 
         <div className="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
-          <p className="text-sm font-medium text-slate-700">Routes Ready</p>
+          <p className="text-sm font-medium text-slate-700">Route Readiness</p>
           <p className="mt-2 text-3xl font-bold text-emerald-700">
             {summary.routesReady}/{summary.totalRoutes}
           </p>
           {summary.routesNeedAttention > 0 ? (
             <p className="mt-2 inline-flex rounded-full bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700">
-              ⚠️ {summary.routesNeedAttention} routes need attention
+              {summary.routesNeedAttention} routes need attention
             </p>
           ) : (
             <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">
-              <CheckCircle2 size={12} />
+              <RouteIcon size={12} />
               All routes ready
             </p>
           )}
@@ -733,12 +778,12 @@ export default function AvailabilityPage() {
             className="mx-auto mb-3 animate-spin text-slate-400"
             size={20}
           />
-          Loading availability report...
+          Loading availability data...
         </div>
       ) : routeReports.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-600 shadow-sm">
           <XCircle className="mx-auto mb-3 text-slate-400" size={20} />
-          No active routes found for this report.
+          No active routes found for the selected date.
         </div>
       ) : (
         <div className="space-y-4">

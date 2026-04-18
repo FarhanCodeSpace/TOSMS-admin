@@ -250,18 +250,18 @@ export default function SettingsPage() {
 
   return (
     <section className="space-y-6">
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-        <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
-        <p className="mt-2 text-sm text-slate-600">
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
+        <h1 className="text-2xl font-semibold text-[var(--text)]">Settings</h1>
+        <p className="mt-2 text-sm text-[var(--text-secondary)]">
           Manage company account details, admin credentials, and dashboard-wide
           statistics.
         </p>
       </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
         <div className="mb-5 flex items-center gap-2">
-          <Building2 className="h-5 w-5 text-slate-600" />
-          <h2 className="text-lg font-semibold text-slate-900">
+          <Building2 className="h-5 w-5 text-[var(--text-secondary)]" />
+          <h2 className="text-lg font-semibold text-[var(--text)]">
             Company Information
           </h2>
         </div>
@@ -330,17 +330,17 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
         <div className="mb-5 flex items-center gap-2">
-          <Lock className="h-5 w-5 text-slate-600" />
-          <h2 className="text-lg font-semibold text-slate-900">
+          <Lock className="h-5 w-5 text-[var(--text-secondary)]" />
+          <h2 className="text-lg font-semibold text-[var(--text)]">
             Admin Account
           </h2>
         </div>
 
-        <p className="mb-4 text-sm text-slate-600">
+        <p className="mb-4 text-sm text-[var(--text-secondary)]">
           Signed in as:{" "}
-          <span className="font-semibold text-slate-900">{adminEmail}</span>
+          <span className="font-semibold text-[var(--text)]">{adminEmail}</span>
         </p>
 
         <div className="grid gap-4 md:grid-cols-3">
@@ -419,8 +419,8 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-        <h2 className="mb-4 text-lg font-semibold text-slate-900">
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
+        <h2 className="mb-4 text-lg font-semibold text-[var(--text)]">
           Dashboard Statistics
         </h2>
 

@@ -18,6 +18,9 @@ import {
   Loader2,
   AlertCircle,
   Mail,
+  Banknote,
+  Clock3,
+  ShieldCheck,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { db } from "@/lib/firebase";
@@ -37,7 +40,7 @@ import {
   normalizeFeeStatus,
 } from "@/utils/feeHelpers";
 import { getCurrentMonthString, formatMonthDisplay } from "@/utils/dateHelpers";
-import StatsCard from "@/components/ui/StatsCard";
+import MetricTile from "@/components/ui/MetricTile";
 import PaymentCard from "@/components/fees/PaymentCard";
 import ReceiptModal from "@/components/fees/ReceiptModal";
 import RevenueChart from "@/components/fees/RevenueChart";
@@ -236,6 +239,37 @@ export default function FeesPage() {
         ]),
     );
   }, [allStudents, routes]);
+
+  const expectedOutstandingAmount = useMemo(
+    () =>
+      outstandingStudents.reduce(
+        (sum, student) => sum + (student.monthlyFeeAmount || 0),
+        0,
+      ),
+    [outstandingStudents],
+  );
+
+  const totalCollectionTarget = totalCollected + expectedOutstandingAmount;
+  const collectedIndicatorPercent =
+    totalCollectionTarget > 0
+      ? Math.round((totalCollected / totalCollectionTarget) * 100)
+      : 0;
+
+  const verificationBase = allPayments.length || 0;
+  const pendingIndicatorPercent =
+    verificationBase > 0
+      ? Math.round((pendingCount / verificationBase) * 100)
+      : 0;
+  const verifiedIndicatorPercent =
+    verificationBase > 0
+      ? Math.round((verifiedCount / verificationBase) * 100)
+      : 0;
+
+  const payableStudentsCount = studentFeeMap.size;
+  const outstandingIndicatorPercent =
+    payableStudentsCount > 0
+      ? Math.round((outstandingCount / payableStudentsCount) * 100)
+      : 0;
 
   useEffect(() => {
     const submitted = allPayments.filter((payment) =>
@@ -532,96 +566,81 @@ export default function FeesPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <section className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900">Fee Management</h1>
-        <p className="text-slate-600 mt-1">Manage student payments and fees</p>
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
+        <h1 className="text-3xl font-bold text-[var(--text)]">
+          Fee Management
+        </h1>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          Manage student payments and monthly fee reconciliation.
+        </p>
       </div>
 
       {/* Month Selector */}
-      <div className="flex items-center gap-4 bg-white rounded-lg border border-slate-200 p-4 shadow-sm">
+      <div className="flex items-center gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm">
         <button
           onClick={handlePreviousMonth}
-          className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+          className="rounded-lg p-2 transition-colors hover:bg-[var(--surface-secondary)]"
         >
-          <ChevronLeft size={20} className="text-slate-600" />
+          <ChevronLeft size={20} className="text-[var(--text-secondary)]" />
         </button>
         <div className="flex-1 text-center">
-          <p className="text-lg font-semibold text-slate-900">
+          <p className="text-lg font-semibold text-[var(--text)]">
             {formatMonthDisplay(selectedMonth)}
           </p>
         </div>
         <button
           onClick={handleNextMonth}
-          className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+          className="rounded-lg p-2 transition-colors hover:bg-[var(--surface-secondary)]"
         >
-          <ChevronRight size={20} className="text-slate-600" />
+          <ChevronRight size={20} className="text-[var(--text-secondary)]" />
         </button>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <StatsCard
+        <MetricTile
           title="Total Collected"
           value={formatPKR(totalCollected)}
-          label="Verified Payments"
-          icon={<span className="text-xl">✓</span>}
-          iconBg="#d1fae5"
-          iconColor="#10b981"
+          icon={<Banknote size={24} />}
+          subtitle={`${verifiedCount} verified`}
+          trend={totalCollected > 0 ? "up" : "neutral"}
+          indicatorPercent={collectedIndicatorPercent}
         />
-        <div className="relative min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div
-            className="absolute right-6 top-6 flex h-12 w-12 items-center justify-center rounded-2xl"
-            style={{ backgroundColor: "#fed7aa", color: "#f97316" }}
-          >
-            <AlertCircle size={24} />
-          </div>
-          <p className="min-h-[2.75rem] max-w-[calc(100%-4.5rem)] text-sm font-medium leading-5 text-gray-500">
-            Pending Verification
-          </p>
-          <div className="mt-6 flex items-baseline gap-2">
-            <p className="text-[32px] font-bold text-[#1A3C5E]">
-              {pendingCount}
-            </p>
-            {pendingCount > 0 && (
-              <span className="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800">
-                {pendingCount}
-              </span>
-            )}
-          </div>
-          <p className="mt-2 text-sm text-gray-500">Submitted payments</p>
-          <button
-            onClick={() => {
-              setActiveTab("pending");
-              window.scrollTo({ top: 300, behavior: "smooth" });
-            }}
-            className="mt-5 text-sm text-blue-600 hover:text-blue-700 font-medium"
-          >
-            View pending →
-          </button>
-        </div>
-        <StatsCard
+        <MetricTile
+          title="Pending Verification"
+          value={pendingCount}
+          icon={<Clock3 size={24} />}
+          subtitle={`${selectedMonth} submissions`}
+          trend={pendingCount > 0 ? "down" : "neutral"}
+          indicatorPercent={pendingIndicatorPercent}
+          onClick={() => {
+            setActiveTab("pending");
+            window.scrollTo({ top: 300, behavior: "smooth" });
+          }}
+        />
+        <MetricTile
           title="Verified Payments"
           value={verifiedCount}
-          label="Completed verifications"
-          icon={<span className="text-xl">✓</span>}
-          iconBg="#dcfce7"
-          iconColor="#16a34a"
+          icon={<ShieldCheck size={24} />}
+          subtitle={`${selectedMonth} approved`}
+          trend={verifiedCount > 0 ? "up" : "neutral"}
+          indicatorPercent={verifiedIndicatorPercent}
         />
-        <StatsCard
+        <MetricTile
           title="Outstanding"
           value={outstandingCount}
-          label="Students without payment"
-          icon={<span className="text-xl">!</span>}
-          iconBg="#fee2e2"
-          iconColor="#ef4444"
+          icon={<AlertCircle size={24} />}
+          subtitle="students with due fees"
+          trend={outstandingCount > 0 ? "down" : "up"}
+          indicatorPercent={outstandingIndicatorPercent}
         />
       </div>
 
       {/* Tabs */}
-      <div className="bg-white rounded-lg border border-slate-200 shadow-sm">
-        <div className="border-b border-slate-200">
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+        <div className="border-b border-[var(--border)]">
           <div className="flex gap-8 px-6">
             <button
               onClick={() => {
@@ -630,8 +649,8 @@ export default function FeesPage() {
               }}
               className={`py-4 font-semibold border-b-2 transition-colors ${
                 activeTab === "pending"
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-slate-600 hover:text-slate-900"
+                  ? "border-[var(--accent)] text-[var(--primary)]"
+                  : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
               }`}
             >
               Pending Verification
@@ -648,8 +667,8 @@ export default function FeesPage() {
               }}
               className={`py-4 font-semibold border-b-2 transition-colors ${
                 activeTab === "all"
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-slate-600 hover:text-slate-900"
+                  ? "border-[var(--accent)] text-[var(--primary)]"
+                  : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
               }`}
             >
               All Payments
@@ -661,8 +680,8 @@ export default function FeesPage() {
               }}
               className={`py-4 font-semibold border-b-2 transition-colors ${
                 activeTab === "outstanding"
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-slate-600 hover:text-slate-900"
+                  ? "border-[var(--accent)] text-[var(--primary)]"
+                  : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
               }`}
             >
               Outstanding Fees
@@ -674,8 +693,8 @@ export default function FeesPage() {
               }}
               className={`py-4 font-semibold border-b-2 transition-colors ${
                 activeTab === "exempt"
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-slate-600 hover:text-slate-900"
+                  ? "border-[var(--accent)] text-[var(--primary)]"
+                  : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
               }`}
             >
               Exempt Fees
@@ -798,7 +817,7 @@ export default function FeesPage() {
                 </div>
                 <button
                   onClick={handleExportCSV}
-                  className="flex items-center gap-2 rounded-lg bg-green-600 hover:bg-green-700 text-white px-4 py-2 text-sm font-semibold transition-colors"
+                  className="flex items-center gap-2 rounded-lg bg-[var(--success)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90"
                 >
                   <DownloadCloud size={16} />
                   Export CSV
@@ -1292,7 +1311,7 @@ export default function FeesPage() {
         onCancel={() => setReminderConfirmOpen(false)}
         isLoading={reminderLoading}
       />
-    </div>
+    </section>
   );
 }
 

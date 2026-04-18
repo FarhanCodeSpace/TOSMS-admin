@@ -370,12 +370,12 @@ export default function ReviewsPage() {
   }
 
   return (
-    <section className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+    <section className="space-y-6 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900">
+        <h1 className="text-2xl font-semibold text-[var(--text)]">
           Reviews &amp; Ratings
         </h1>
-        <p className="mt-2 text-sm text-slate-600">
+        <p className="mt-2 text-sm text-[var(--text-secondary)]">
           Monitor student feedback, moderate inappropriate comments, and track
           driver service quality.
         </p>
@@ -472,7 +472,7 @@ export default function ReviewsPage() {
         )}
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-secondary)] p-4">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <label className="text-xs font-semibold uppercase tracking-wide text-slate-600">
             Driver

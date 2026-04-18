@@ -323,23 +323,30 @@ export default function StudentsPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <section className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-slate-900">
-          Student Management
-        </h1>
-        <button
-          onClick={exportCSV}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700"
-        >
-          <Download size={18} />
-          Export CSV
-        </button>
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-[var(--text)]">
+              Student Management
+            </h1>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              Manage route assignments, fee status, and student records.
+            </p>
+          </div>
+          <button
+            onClick={exportCSV}
+            className="inline-flex items-center gap-2 rounded-xl bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+          >
+            <Download size={18} />
+            Export CSV
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatsCard
           title="Total Students"
           value={stats.total}
@@ -381,9 +388,9 @@ export default function StudentsPage() {
       </div>
 
       {/* Search and Filters */}
-      <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
+      <div className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm">
         <div className="flex gap-3">
-          <Search size={20} className="text-slate-400" />
+          <Search size={20} className="text-[var(--text-muted)]" />
           <input
             type="text"
             placeholder="Search by name or email..."
@@ -392,11 +399,11 @@ export default function StudentsPage() {
               setSearchTerm(e.target.value);
               setCurrentPage(1);
             }}
-            className="flex-1 bg-transparent outline-none"
+            className="flex-1 bg-transparent text-[var(--text)] placeholder:text-[var(--text-muted)] outline-none"
           />
         </div>
 
-        <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4">
+        <div className="flex flex-wrap gap-2 border-t border-[var(--border)] pt-4">
           {(
             [
               { value: "all", label: "All" },
@@ -413,8 +420,8 @@ export default function StudentsPage() {
               }}
               className={`rounded-full px-4 py-1 text-sm font-medium transition ${
                 filterStatus === filter.value
-                  ? "bg-blue-600 text-white"
-                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  ? "bg-[var(--primary)] text-white"
+                  : "bg-[var(--surface-secondary)] text-[var(--text-secondary)] hover:opacity-90"
               }`}
             >
               {filter.label}
@@ -424,39 +431,42 @@ export default function StudentsPage() {
       </div>
 
       {/* Students Table */}
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <div className="overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
         <table className="w-full">
-          <thead className="border-b border-slate-200 bg-slate-50">
+          <thead className="border-b border-[var(--border)] bg-[var(--surface-secondary)]">
             <tr>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+              <th className="px-6 py-3 text-left text-sm font-semibold text-[var(--text)]">
                 Student
               </th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+              <th className="px-6 py-3 text-left text-sm font-semibold text-[var(--text)]">
                 Email
               </th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+              <th className="px-6 py-3 text-left text-sm font-semibold text-[var(--text)]">
                 Phone
               </th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+              <th className="px-6 py-3 text-left text-sm font-semibold text-[var(--text)]">
                 Assigned Route
               </th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+              <th className="px-6 py-3 text-left text-sm font-semibold text-[var(--text)]">
                 Pickup Stop
               </th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+              <th className="px-6 py-3 text-left text-sm font-semibold text-[var(--text)]">
                 Fee Status
               </th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">
+              <th className="px-6 py-3 text-left text-sm font-semibold text-[var(--text)]">
                 Registered
               </th>
-              <th className="px-6 py-3 text-center text-sm font-semibold text-slate-900">
+              <th className="px-6 py-3 text-center text-sm font-semibold text-[var(--text)]">
                 Actions
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200">
+          <tbody className="divide-y divide-[var(--border)]">
             {paginatedStudents.map((student) => (
-              <tr key={student.uid} className="hover:bg-slate-50">
+              <tr
+                key={student.uid}
+                className="hover:bg-[var(--surface-secondary)]"
+              >
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-semibold">
@@ -561,11 +571,11 @@ export default function StudentsPage() {
           <button
             onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
             disabled={currentPage === 1}
-            className="p-2 hover:bg-slate-100 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded p-2 hover:bg-[var(--surface-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <ChevronLeft size={18} />
           </button>
-          <span className="text-sm font-medium text-slate-600">
+          <span className="text-sm font-medium text-[var(--text-secondary)]">
             Page {currentPage} of {totalPages}
           </span>
           <button
@@ -573,7 +583,7 @@ export default function StudentsPage() {
               setCurrentPage(Math.min(totalPages, currentPage + 1))
             }
             disabled={currentPage === totalPages}
-            className="p-2 hover:bg-slate-100 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded p-2 hover:bg-[var(--surface-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <ChevronRight size={18} />
           </button>
@@ -627,6 +637,6 @@ export default function StudentsPage() {
         destructive
         isLoading={isDeletingStudent}
       />
-    </div>
+    </section>
   );
 }

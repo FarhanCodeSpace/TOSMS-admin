@@ -28,20 +28,20 @@ type StudentAvailabilityRowProps = {
 function getStatusMeta(status: StudentAvailabilityStatus) {
   if (status === "available") {
     return {
-      label: "Available ✅",
+      label: "Available",
       classes: "bg-emerald-100 text-emerald-800",
     };
   }
 
   if (status === "not_available") {
     return {
-      label: "Not Available ❌",
+      label: "Not Available",
       classes: "bg-rose-100 text-rose-800",
     };
   }
 
   return {
-    label: "Not Responded ⏰",
+    label: "No Response",
     classes: "bg-amber-100 text-amber-800",
   };
 }

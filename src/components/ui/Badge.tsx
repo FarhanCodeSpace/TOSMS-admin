@@ -1,36 +1,87 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import { ReactNode } from "react";
 
-type BadgeProps = {
-  status: string;
+interface BadgeProps {
   children?: ReactNode;
+  status?: string;
+  variant?:
+    | "default"
+    | "success"
+    | "warning"
+    | "error"
+    | "info"
+    | "pending"
+    | "active";
+  className?: string;
+  hasPulse?: boolean;
+}
+
+const statusVariantMap: Record<string, BadgeProps["variant"]> = {
+  verified: "success",
+  approved: "success",
+  active: "active",
+  available: "success",
+  exempt: "info",
+  pending: "pending",
+  submitted: "warning",
+  due: "error",
+  scheduled: "info",
+  unavailable: "error",
+  no_data: "default",
+  unassigned: "default",
+  declined: "error",
 };
 
-const badgeStyles: Record<string, string> = {
-  verified: "bg-emerald-100 text-emerald-700",
-  approved: "bg-emerald-100 text-emerald-700",
-  active: "bg-emerald-100 text-emerald-700",
-  available: "bg-emerald-100 text-emerald-700",
-  exempt: "bg-violet-100 text-violet-700",
-  pending: "bg-amber-100 text-amber-700",
-  submitted: "bg-amber-100 text-amber-700",
-  due: "bg-rose-100 text-rose-700",
-  scheduled: "bg-sky-100 text-sky-700",
-  unavailable: "bg-rose-100 text-rose-700",
-  no_data: "bg-slate-100 text-slate-700",
-  unassigned: "bg-slate-100 text-slate-700",
-  declined: "bg-rose-100 text-rose-700",
-};
+export default function Badge({
+  children,
+  status,
+  variant: propVariant,
+  className,
+  hasPulse,
+}: BadgeProps) {
+  const variant =
+    propVariant ||
+    (status ? statusVariantMap[status.toLowerCase()] || "default" : "default");
 
-export default function Badge({ status, children }: BadgeProps) {
-  const normalized = status.toLowerCase();
-  const classes = badgeStyles[normalized] ?? "bg-slate-100 text-slate-700";
+  const baseClasses =
+    "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium";
+
+  const variantClasses = {
+    default: "bg-[var(--surface-secondary)] text-[var(--text)]",
+    success:
+      "bg-[var(--success-light)] text-[var(--success)] dark:bg-[var(--success)]/20",
+    warning:
+      "bg-[var(--warning-light)] text-[var(--warning)] dark:bg-[var(--warning)]/20",
+    error:
+      "bg-[var(--error-light)] text-[var(--error)] dark:bg-[var(--error)]/20",
+    info: "bg-[var(--primary-light)] text-[var(--primary)] dark:bg-[var(--primary)]/20",
+    pending:
+      "bg-[var(--warning-light)] text-[var(--warning)] dark:bg-[var(--warning)]/20",
+    active:
+      "bg-[var(--success-light)] text-[var(--success)] dark:bg-[var(--success)]/20",
+  };
+
+  const dotColor = {
+    default: "bg-[var(--text-secondary)]",
+    success: "bg-[var(--success)]",
+    warning: "bg-[var(--warning)]",
+    error: "bg-[var(--error)]",
+    info: "bg-[var(--primary)]",
+    pending: "bg-[var(--warning)]",
+    active: "bg-[var(--success)]",
+  };
 
   return (
-    <span
-      className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${classes}`}
-    >
+    <span className={cn(baseClasses, variantClasses[variant], className)}>
+      <span
+        className={cn(
+          "w-1.5 h-1.5 rounded-full",
+          dotColor[variant],
+          variant === "active" && hasPulse && "animate-pulse-dot",
+        )}
+      />
       {children ?? status}
     </span>
   );

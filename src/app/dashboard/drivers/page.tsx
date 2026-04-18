@@ -594,20 +594,20 @@ export default function DriversPage() {
   };
 
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+    <section className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">
+          <h1 className="text-2xl font-semibold text-[var(--text)]">
             Driver Management
           </h1>
-          <p className="mt-2 text-sm text-slate-600">
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">
             Manage your driver fleet, approvals, and assignments.
           </p>
         </div>
         <button
           onClick={handleExportCSV}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition"
+          className="inline-flex items-center gap-2 rounded-xl bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
         >
           <Download size={18} />
           Export CSV
@@ -615,7 +615,7 @@ export default function DriversPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6 border-b border-slate-200">
+      <div className="mb-6 flex gap-2 border-b border-[var(--border)]">
         <button
           onClick={() => {
             setActiveTab("pending");
@@ -623,8 +623,8 @@ export default function DriversPage() {
           }}
           className={`px-4 py-3 text-sm font-medium transition relative ${
             activeTab === "pending"
-              ? "text-blue-600"
-              : "text-slate-600 hover:text-slate-900"
+              ? "text-[var(--primary)]"
+              : "text-[var(--text-secondary)] hover:text-[var(--text)]"
           }`}
         >
           Pending Approval
@@ -634,7 +634,7 @@ export default function DriversPage() {
             </span>
           )}
           {activeTab === "pending" && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600"></div>
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-[var(--accent)]"></div>
           )}
         </button>
 
@@ -647,13 +647,13 @@ export default function DriversPage() {
           }}
           className={`px-4 py-3 text-sm font-medium transition relative ${
             activeTab === "approved"
-              ? "text-blue-600"
-              : "text-slate-600 hover:text-slate-900"
+              ? "text-[var(--primary)]"
+              : "text-[var(--text-secondary)] hover:text-[var(--text)]"
           }`}
         >
           Approved
           {activeTab === "approved" && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600"></div>
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-[var(--accent)]"></div>
           )}
         </button>
 
@@ -664,13 +664,13 @@ export default function DriversPage() {
           }}
           className={`px-4 py-3 text-sm font-medium transition relative ${
             activeTab === "suspended"
-              ? "text-blue-600"
-              : "text-slate-600 hover:text-slate-900"
+              ? "text-[var(--primary)]"
+              : "text-[var(--text-secondary)] hover:text-[var(--text)]"
           }`}
         >
           Suspended
           {activeTab === "suspended" && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600"></div>
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-[var(--accent)]"></div>
           )}
         </button>
       </div>

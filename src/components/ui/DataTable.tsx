@@ -4,6 +4,7 @@ import { type ReactNode, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import EmptyState from "@/components/ui/EmptyState";
 import SkeletonLoader from "@/components/ui/SkeletonLoader";
+import { cn } from "@/lib/utils";
 
 export type DataTableColumn<T> = {
   key: string;
@@ -27,6 +28,7 @@ type DataTableProps<T> = {
   emptySubtitle?: string;
   emptyActionLabel?: string;
   onEmptyAction?: () => void;
+  className?: string;
 };
 
 export default function DataTable<T>({
@@ -39,6 +41,7 @@ export default function DataTable<T>({
   emptySubtitle = "Try adjusting your filters.",
   emptyActionLabel,
   onEmptyAction,
+  className,
 }: DataTableProps<T>) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
@@ -94,31 +97,50 @@ export default function DataTable<T>({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+    <div className={cn("space-y-4", className)}>
+      <div
+        className={cn(
+          "overflow-x-auto rounded-lg border",
+          "border-[var(--border)]",
+          "bg-[var(--surface)]",
+          "shadow-md",
+        )}
+      >
         <table className="min-w-full">
-          <thead className="border-b border-slate-200 bg-slate-50">
+          <thead
+            className={cn(
+              "sticky top-0 z-10",
+              "border-b border-[var(--border)]",
+              "bg-[var(--surface-secondary)]",
+            )}
+          >
             <tr>
               {columns.map((column) => (
                 <th
                   key={column.key}
-                  className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 ${column.className ?? ""}`}
+                  className={cn(
+                    "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide",
+                    "text-[var(--text-secondary)]",
+                    "hover:text-[var(--text)]",
+                    "transition-colors duration-200",
+                    column.className ?? "",
+                  )}
                 >
                   {column.sortable ? (
                     <button
                       type="button"
                       onClick={() => toggleSort(column.key)}
-                      className="inline-flex items-center gap-1"
+                      className="inline-flex items-center gap-1 cursor-pointer"
                     >
                       <span>{column.header}</span>
                       {sortKey === column.key ? (
                         sortDirection === "asc" ? (
-                          <ChevronUp className="h-3 w-3" />
+                          <ChevronUp className="h-4 w-4" />
                         ) : (
-                          <ChevronDown className="h-3 w-3" />
+                          <ChevronDown className="h-4 w-4" />
                         )
                       ) : (
-                        <ChevronDown className="h-3 w-3 opacity-40" />
+                        <ChevronDown className="h-4 w-4 opacity-30" />
                       )}
                     </button>
                   ) : (
@@ -132,12 +154,20 @@ export default function DataTable<T>({
             {currentRows.map((row, index) => (
               <tr
                 key={keyExtractor(row, index)}
-                className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50"
+                className={cn(
+                  "border-b border-[var(--border)] last:border-b-0",
+                  "transition-colors duration-150",
+                  "hover:bg-[var(--surface-secondary)]",
+                  index % 2 === 1 && "bg-[var(--surface-secondary)]/50",
+                )}
               >
                 {columns.map((column) => (
                   <td
                     key={`${column.key}-${keyExtractor(row, index)}`}
-                    className={`px-4 py-3 text-sm text-slate-700 ${column.className ?? ""}`}
+                    className={cn(
+                      "px-4 py-3 text-sm text-[var(--text)]",
+                      column.className ?? "",
+                    )}
                   >
                     {column.render(row)}
                   </td>
@@ -149,7 +179,7 @@ export default function DataTable<T>({
       </div>
 
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-[var(--text-muted)]">
           Showing {startIndex + 1}-
           {Math.min(startIndex + pageSize, sortedData.length)} of{" "}
           {sortedData.length}
@@ -159,18 +189,30 @@ export default function DataTable<T>({
             type="button"
             onClick={() => setPage((prev) => Math.max(1, prev - 1))}
             disabled={currentPage === 1}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className={cn(
+              "rounded-lg border px-3 py-1.5 text-sm font-medium",
+              "border-[var(--border)] text-[var(--text)]",
+              "hover:bg-[var(--surface-secondary)]",
+              "transition-colors duration-200",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+            )}
           >
             Previous
           </button>
-          <span className="text-sm text-slate-600">
+          <span className="text-sm text-[var(--text-secondary)] min-w-fit">
             Page {currentPage} of {totalPages}
           </span>
           <button
             type="button"
             onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
             disabled={currentPage === totalPages}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className={cn(
+              "rounded-lg border px-3 py-1.5 text-sm font-medium",
+              "border-[var(--border)] text-[var(--text)]",
+              "hover:bg-[var(--surface-secondary)]",
+              "transition-colors duration-200",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+            )}
           >
             Next
           </button>

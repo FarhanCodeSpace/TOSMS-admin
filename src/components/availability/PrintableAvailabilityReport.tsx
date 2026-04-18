@@ -148,11 +148,11 @@ export default function PrintableAvailabilityReport({
             </p>
             {summary.routesNeedAttention > 0 ? (
               <p className="text-xs text-rose-600 font-semibold mt-1">
-                ⚠️ {summary.routesNeedAttention} need attention
+                {summary.routesNeedAttention} need attention
               </p>
             ) : (
               <p className="text-xs text-emerald-600 font-semibold mt-1">
-                ✓ All ready
+                All ready
               </p>
             )}
           </div>
@@ -203,10 +203,10 @@ export default function PrintableAvailabilityReport({
                     </p>
                     <p className="text-xs text-slate-500">
                       {report.driver.status === "available"
-                        ? "✓ Ready"
+                        ? "Ready"
                         : report.driver.status === "not_available"
-                          ? "✗ Unavailable"
-                          : "⏰ Not Responded"}
+                          ? "Unavailable"
+                          : "No Response"}
                     </p>
                   </div>
                 </div>

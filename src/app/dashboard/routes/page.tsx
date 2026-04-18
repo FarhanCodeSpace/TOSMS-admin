@@ -1,34 +1,36 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   collection,
+  doc,
   onSnapshot,
   query,
-  where,
   updateDoc,
-  doc,
+  where,
 } from "firebase/firestore";
 import Link from "next/link";
-import { Plus, Edit, Eye, Users, MapPin, Clock } from "lucide-react";
+import { Clock, Edit, Eye, MapPin, Plus, Users } from "lucide-react";
 import toast from "react-hot-toast";
 
-import { db } from "@/lib/firebase";
-import { COLLECTIONS } from "@/lib/collections";
-import { Route, User } from "@/types";
-import { formatTimeTo12Hour } from "@/utils/formatters";
-import { useAuth } from "@/context/AuthContext";
+import AssignDriverModal from "@/components/routes/AssignDriverModal";
 import Badge from "@/components/ui/Badge";
 import EmptyState from "@/components/ui/EmptyState";
 import SkeletonLoader from "@/components/ui/SkeletonLoader";
-import AssignDriverModal from "@/components/routes/AssignDriverModal";
+import { useAuth } from "@/context/AuthContext";
+import { COLLECTIONS } from "@/lib/collections";
+import { db } from "@/lib/firebase";
+import { Route, User } from "@/types";
+import { formatTimeTo12Hour } from "@/utils/formatters";
+
 import CreateRouteModal from "./CreateRouteModal";
 import EditRouteModal from "./EditRouteModal";
 
 export default function RoutesPage() {
   const searchParams = useSearchParams();
   const { currentUser, isLoading: authLoading } = useAuth();
+
   const [routes, setRoutes] = useState<Route[]>([]);
   const [drivers, setDrivers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -42,6 +44,7 @@ export default function RoutesPage() {
     const shouldOpenCreate =
       searchParams.get("create") === "1" ||
       searchParams.get("create") === "true";
+
     if (shouldOpenCreate) {
       setCreateModalOpen(true);
     }
@@ -67,6 +70,7 @@ export default function RoutesPage() {
           ...routeDoc.data(),
           routeId: routeDoc.id,
         })) as Route[];
+
         setRoutes(routesList);
         setIsLoading(false);
       },
@@ -93,6 +97,7 @@ export default function RoutesPage() {
           ...driverDoc.data(),
           uid: driverDoc.id,
         })) as User[];
+
         setDrivers(driversList);
       },
       (error) => {
@@ -109,6 +114,7 @@ export default function RoutesPage() {
       await updateDoc(doc(db, COLLECTIONS.ROUTES, route.routeId), {
         isActive: !route.isActive,
       });
+
       toast.success(`Route ${!route.isActive ? "activated" : "deactivated"}`);
     } catch (error) {
       console.error("Error updating route:", error);
@@ -122,16 +128,26 @@ export default function RoutesPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-slate-900">Routes Management</h1>
-        <button
-          onClick={() => setCreateModalOpen(true)}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700"
-        >
-          <Plus size={18} />
-          Create Route
-        </button>
+    <section className="space-y-6">
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-[var(--text)]">
+              Routes Management
+            </h1>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              Create, assign, and manage transport routes.
+            </p>
+          </div>
+
+          <button
+            onClick={() => setCreateModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+          >
+            <Plus size={18} />
+            Create Route
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -158,10 +174,10 @@ export default function RoutesPage() {
             return (
               <div
                 key={route.routeId}
-                className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md"
+                className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
               >
                 <div className="mb-4 flex items-start justify-between">
-                  <h3 className="flex-1 text-lg font-bold text-slate-900">
+                  <h3 className="flex-1 text-lg font-bold text-[var(--text)]">
                     {route.routeName}
                   </h3>
                   <div
@@ -169,7 +185,7 @@ export default function RoutesPage() {
                   />
                 </div>
 
-                <div className="mb-4 border-b border-slate-200 pb-4">
+                <div className="mb-4 border-b border-[var(--border)] pb-4">
                   {assignedDriver ? (
                     <div className="flex items-center gap-3">
                       <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 to-blue-600 text-xs font-semibold text-white">
@@ -178,23 +194,23 @@ export default function RoutesPage() {
                           .toUpperCase()}
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-slate-900">
+                        <p className="text-sm font-medium text-[var(--text)]">
                           {assignedDriver.fullName}
                         </p>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-xs text-[var(--text-secondary)]">
                           {assignedDriver.vehicleType}
                         </p>
                       </div>
                     </div>
                   ) : (
-                    <div className="inline-block rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700">
+                    <div className="inline-block rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
                       No Driver Assigned
                     </div>
                   )}
                 </div>
 
-                <div className="mb-4 space-y-3 border-b border-slate-200 pb-4">
-                  <div className="flex items-center gap-2 text-sm text-slate-600">
+                <div className="mb-4 space-y-3 border-b border-[var(--border)] pb-4">
+                  <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                     <Clock size={16} />
                     <span>
                       {formatTimeTo12Hour(route.departureTime)} -{" "}
@@ -214,9 +230,11 @@ export default function RoutesPage() {
                   </div>
 
                   {route.feeAmount ? (
-                    <div className="text-sm font-medium text-slate-900">
+                    <div className="text-sm font-medium text-[var(--text)]">
                       PKR {route.feeAmount.toLocaleString("en-PK")}{" "}
-                      <span className="text-xs text-slate-500">/month</span>
+                      <span className="text-xs text-[var(--text-secondary)]">
+                        /month
+                      </span>
                     </div>
                   ) : null}
                 </div>
@@ -229,7 +247,7 @@ export default function RoutesPage() {
                       onChange={() => handleToggleActive(route)}
                       className="h-4 w-4 rounded border-slate-300"
                     />
-                    <span className="text-sm text-slate-600">
+                    <span className="text-sm text-[var(--text-secondary)]">
                       {route.isActive ? "Active" : "Inactive"}
                     </span>
                   </label>
@@ -237,7 +255,7 @@ export default function RoutesPage() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => setAssigningRoute(route)}
-                      className="rounded-md border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                      className="rounded-lg border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--primary)] transition hover:bg-[var(--primary-light)]"
                     >
                       {route.assignedDriverId
                         ? "Change Driver"
@@ -246,18 +264,21 @@ export default function RoutesPage() {
 
                     <Link
                       href={`/dashboard/routes/${route.routeId}`}
-                      className="rounded p-2 transition hover:bg-slate-100"
+                      className="rounded p-2 transition hover:bg-[var(--surface-secondary)]"
                       title="View route details"
                     >
-                      <Eye size={18} className="text-slate-600" />
+                      <Eye size={18} className="text-[var(--text-secondary)]" />
                     </Link>
 
                     <button
                       onClick={() => handleEditClick(route)}
-                      className="rounded p-2 transition hover:bg-slate-100"
+                      className="rounded p-2 transition hover:bg-[var(--surface-secondary)]"
                       title="Edit route"
                     >
-                      <Edit size={18} className="text-slate-600" />
+                      <Edit
+                        size={18}
+                        className="text-[var(--text-secondary)]"
+                      />
                     </button>
                   </div>
                 </div>
@@ -287,6 +308,6 @@ export default function RoutesPage() {
           route={assigningRoute}
         />
       ) : null}
-    </div>
+    </section>
   );
 }

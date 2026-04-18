@@ -3,6 +3,7 @@ import "leaflet/dist/leaflet.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { AuthProvider } from "@/context/AuthContext";
+import { ThemeProvider } from "next-themes";
 import { Toaster } from "react-hot-toast";
 
 export const metadata: Metadata = {
@@ -13,12 +14,31 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body>
-        <AuthProvider>
-          {children}
-          <Toaster position="top-right" />
-        </AuthProvider>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+          <AuthProvider>
+            {children}
+            <Toaster
+              position="bottom-right"
+              toastOptions={{
+                style: {
+                  background: "var(--surface)",
+                  color: "var(--text)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "10px",
+                  fontSize: "14px",
+                },
+                success: {
+                  iconTheme: { primary: "#16A34A", secondary: "white" },
+                },
+                error: {
+                  iconTheme: { primary: "#DC2626", secondary: "white" },
+                },
+              }}
+            />
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

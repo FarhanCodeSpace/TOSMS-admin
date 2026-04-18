@@ -300,12 +300,12 @@ export default function TrackingPage() {
 
   return (
     <section className="flex h-[calc(100vh-7rem)] min-h-[620px] gap-4">
-      <aside className="flex h-full w-80 flex-col rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 px-5 py-4">
+      <aside className="flex h-full w-80 flex-col rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+        <div className="border-b border-[var(--border)] px-5 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              <h1 className="text-lg font-semibold text-slate-900">
+              <h1 className="text-lg font-semibold text-[var(--text)]">
                 Active Rides
               </h1>
             </div>
@@ -321,7 +321,7 @@ export default function TrackingPage() {
               {Array.from({ length: 4 }).map((_, index) => (
                 <div
                   key={index}
-                  className="rounded-2xl border border-slate-200 bg-white px-3 py-3"
+                  className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3"
                 >
                   <div className="flex items-start gap-3">
                     <div className="h-10 w-10 animate-pulse rounded-full bg-slate-200" />
@@ -353,7 +353,7 @@ export default function TrackingPage() {
                     className={`w-full rounded-2xl border px-3 py-3 text-left transition ${
                       isFocused
                         ? "border-emerald-300 bg-emerald-50"
-                        : "border-slate-200 bg-white hover:border-slate-300"
+                        : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)]"
                     }`}
                   >
                     <div className="flex items-start gap-3">
@@ -371,10 +371,10 @@ export default function TrackingPage() {
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-slate-900">
+                        <p className="truncate text-sm font-semibold text-[var(--text)]">
                           {ride.driverName}
                         </p>
-                        <p className="truncate text-xs text-slate-500">
+                        <p className="truncate text-xs text-[var(--text-secondary)]">
                           {ride.routeName}
                         </p>
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
@@ -396,7 +396,7 @@ export default function TrackingPage() {
         </div>
       </aside>
 
-      <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
         <div className="min-h-0 flex-1">
           <TrackingMap
             activeRides={activeTrackingRides}
@@ -406,17 +406,17 @@ export default function TrackingPage() {
           />
         </div>
 
-        <div className="flex items-center justify-between border-t border-slate-200 px-4 py-2 text-xs">
-          <div className="flex items-center gap-4 text-slate-600">
+        <div className="flex items-center justify-between border-t border-[var(--border)] px-4 py-2 text-xs">
+          <div className="flex items-center gap-4 text-[var(--text-secondary)]">
             <span>
               Active drivers:{" "}
-              <strong className="text-slate-900">
+              <strong className="text-[var(--text)]">
                 {activeTrackingRides.length}
               </strong>
             </span>
             <span>
               Last refresh:{" "}
-              <strong className="text-slate-900">
+              <strong className="text-[var(--text)]">
                 {formatClockTime(lastRefreshAt)}
               </strong>
             </span>

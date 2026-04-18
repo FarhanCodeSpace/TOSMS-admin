@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
+import { cn } from "@/lib/utils";
 
 type ActivityFeedItem = {
   id: string;
@@ -27,6 +28,15 @@ const statusDotClasses: Record<string, string> = {
   approved: "bg-emerald-500",
 };
 
+const statusLabelClasses: Record<string, string> = {
+  verified: "bg-[var(--success-light)] text-[var(--success)]",
+  submitted: "bg-[var(--warning-light)] text-[var(--warning)]",
+  pending: "bg-[var(--warning-light)] text-[var(--warning)]",
+  canceled: "bg-[var(--error-light)] text-[var(--error)]",
+  rejected: "bg-[var(--error-light)] text-[var(--error)]",
+  approved: "bg-[var(--success-light)] text-[var(--success)]",
+};
+
 export default function ActivityFeed({
   title,
   viewAllHref,
@@ -34,15 +44,20 @@ export default function ActivityFeed({
   emptyText = "No recent activity yet.",
 }: ActivityFeedProps) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div
+      className={cn(
+        "rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm",
+        "transition-all duration-200",
+      )}
+    >
       <div className="mb-6 flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+          <h2 className="text-lg font-semibold text-[var(--text)]">{title}</h2>
         </div>
         {viewAllHref ? (
           <Link
             href={viewAllHref as any}
-            className="text-sm font-medium text-sky-600 transition hover:text-sky-800"
+            className="text-sm font-medium text-[var(--primary)] transition hover:opacity-80"
           >
             View All
           </Link>
@@ -51,30 +66,44 @@ export default function ActivityFeed({
 
       <div className="max-h-[320px] space-y-4 overflow-y-auto pr-1">
         {items.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface-secondary)] p-8 text-center text-sm text-[var(--text-muted)]">
             {emptyText}
           </div>
         ) : (
           items.map((item) => (
             <div
               key={item.id}
-              className="flex min-w-0 items-start gap-4 rounded-3xl border border-slate-200 bg-slate-50 p-4"
+              className="flex min-w-0 items-start gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-secondary)]/60 p-4 transition-colors duration-200 hover:bg-[var(--surface-secondary)]"
             >
-              <span
-                className={`mt-2 inline-block h-2.5 w-2.5 rounded-full ${
-                  statusDotClasses[item.status.toLowerCase()] || "bg-slate-400"
-                }`}
-              />
-              <div className="flex-1 min-w-0 text-sm text-slate-700">
-                <p className="font-semibold text-slate-900 break-words">
-                  {item.title}
-                </p>
+              <div className="mt-1.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--surface)] shadow-sm">
+                <span
+                  className={`inline-block h-2.5 w-2.5 rounded-full ${
+                    statusDotClasses[item.status.toLowerCase()] ||
+                    "bg-[var(--text-muted)]"
+                  }`}
+                />
+              </div>
+              <div className="flex-1 min-w-0 text-sm text-[var(--text-secondary)]">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-semibold text-[var(--text)] break-words">
+                    {item.title}
+                  </p>
+                  <span
+                    className={cn(
+                      "rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide",
+                      statusLabelClasses[item.status.toLowerCase()] ||
+                        "bg-[var(--surface)] text-[var(--text-muted)]",
+                    )}
+                  >
+                    {item.status}
+                  </span>
+                </div>
                 {item.description ? (
-                  <p className="mt-1 text-sm text-slate-500 break-words">
+                  <p className="mt-1 text-sm text-[var(--text-secondary)] break-words">
                     {item.description}
                   </p>
                 ) : null}
-                <p className="mt-2 text-xs text-slate-500">
+                <p className="mt-2 text-xs text-[var(--text-muted)]">
                   {item.date
                     ? formatDistanceToNow(item.date, { addSuffix: true })
                     : "just now"}

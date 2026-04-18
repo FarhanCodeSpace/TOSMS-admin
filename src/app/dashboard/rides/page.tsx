@@ -22,6 +22,7 @@ import CreateRideModal from "@/components/rides/CreateRideModal";
 import RideCard from "@/components/rides/RideCard";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import Modal from "@/components/ui/Modal";
+import SkeletonLoader from "@/components/ui/SkeletonLoader";
 import { COLLECTIONS } from "@/lib/collections";
 import { db } from "@/lib/firebase";
 import type { Availability, Ride, Route, User } from "@/types";
@@ -183,7 +184,11 @@ function RideDetailModal({
           </div>
 
           {isLoading ? (
-            <p className="mt-3 text-sm text-slate-500">Loading students...</p>
+            <div className="mt-3 space-y-2">
+              <SkeletonLoader rows={1} className="h-4 w-1/3" />
+              <SkeletonLoader rows={1} className="h-4 w-full" />
+              <SkeletonLoader rows={1} className="h-4 w-2/3" />
+            </div>
           ) : availableStudents.length === 0 ? (
             <p className="mt-3 text-sm text-slate-500">
               No available students for this ride date.
@@ -250,10 +255,12 @@ export default function RidesPage() {
   );
 
   const [todayRides, setTodayRides] = useState<RideWithMeta[]>([]);
+  const [isTodayRidesLoading, setIsTodayRidesLoading] = useState(true);
   const [todayAvailabilityCountByRoute, setTodayAvailabilityCountByRoute] =
     useState<Record<string, number>>({});
 
   const [allRides, setAllRides] = useState<RideWithMeta[]>([]);
+  const [isAllRidesLoading, setIsAllRidesLoading] = useState(true);
   const [availabilityCountByRouteDate, setAvailabilityCountByRouteDate] =
     useState<Record<string, number>>({});
 
@@ -324,6 +331,7 @@ export default function RidesPage() {
   }, []);
 
   useEffect(() => {
+    setIsTodayRidesLoading(true);
     const unsubscribe = onSnapshot(
       query(
         collection(db, COLLECTIONS.RIDES),
@@ -335,10 +343,12 @@ export default function RidesPage() {
           rideId: rideDoc.id,
         }));
         setTodayRides(rides);
+        setIsTodayRidesLoading(false);
       },
       (error) => {
         console.error("Error fetching today's rides:", error);
         toast.error("Failed to load today's rides");
+        setIsTodayRidesLoading(false);
       },
     );
 
@@ -366,6 +376,7 @@ export default function RidesPage() {
   }, [todayString]);
 
   useEffect(() => {
+    setIsAllRidesLoading(true);
     const unsubscribe = onSnapshot(
       query(
         collection(db, COLLECTIONS.RIDES),
@@ -378,10 +389,12 @@ export default function RidesPage() {
           rideId: rideDoc.id,
         }));
         setAllRides(rides);
+        setIsAllRidesLoading(false);
       },
       (error) => {
         console.error("Error fetching rides:", error);
         toast.error("Failed to load rides table");
+        setIsAllRidesLoading(false);
       },
     );
 
@@ -528,40 +541,54 @@ export default function RidesPage() {
   }, [todayString]);
 
   return (
-    <div className="space-y-7">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-bold text-slate-900">Rides Management</h1>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setCreateModalOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
-          >
-            <Plus className="h-4 w-4" />
-            Create Ride
-          </button>
-          <button
-            type="button"
-            onClick={() => setBulkModalOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
-          >
-            <Rows4 className="h-4 w-4" />
-            Bulk Create Rides
-          </button>
+    <section className="space-y-7">
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-bold text-[var(--text)]">
+              Rides Management
+            </h1>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              Create daily rides and monitor route execution.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setCreateModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+            >
+              <Plus className="h-4 w-4" />
+              Create Ride
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-secondary)] px-4 py-2 text-sm font-semibold text-[var(--text)] transition hover:opacity-90"
+            >
+              <Rows4 className="h-4 w-4" />
+              Bulk Create Rides
+            </button>
+          </div>
         </div>
       </div>
 
-      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-900">
+          <h2 className="text-xl font-bold text-[var(--text)]">
             Today&apos;s Rides
           </h2>
-          <p className="text-sm font-semibold text-slate-500">
+          <p className="text-sm font-semibold text-[var(--text-secondary)]">
             {formatDateDisplay(todayString)}
           </p>
         </div>
 
-        {todayRides.length === 0 ? (
+        {isTodayRidesLoading ? (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <SkeletonLoader variant="card" className="h-56" />
+            <SkeletonLoader variant="card" className="h-56" />
+          </div>
+        ) : todayRides.length === 0 ? (
           <div className="rounded-xl border border-orange-300 bg-orange-50 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm font-semibold text-orange-800">
@@ -600,12 +627,12 @@ export default function RidesPage() {
         )}
       </section>
 
-      <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-900">All Rides</h2>
+          <h2 className="text-xl font-bold text-[var(--text)]">All Rides</h2>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-secondary)] p-3 md:grid-cols-4">
           <label className="space-y-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
             Start Date
             <input
@@ -657,125 +684,129 @@ export default function RidesPage() {
           </label>
         </div>
 
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
-          <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Route Name
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Driver
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Date
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Departure
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Status
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Available Students
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Boarded Count
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
-              {filteredAllRides.map((ride) => {
-                const availabilityKey = `${ride.routeId}__${ride.date}`;
-                const availableCount =
-                  availabilityCountByRouteDate[availabilityKey] || 0;
+        {isAllRidesLoading ? (
+          <SkeletonLoader variant="table" rows={8} />
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-[var(--border)]">
+            <table className="min-w-full divide-y divide-[var(--border)]">
+              <thead className="bg-[var(--surface-secondary)]">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Route Name
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Driver
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Date
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Departure
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Status
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Available Students
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Boarded Count
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--border)] bg-[var(--surface)]">
+                {filteredAllRides.map((ride) => {
+                  const availabilityKey = `${ride.routeId}__${ride.date}`;
+                  const availableCount =
+                    availabilityCountByRouteDate[availabilityKey] || 0;
 
-                return (
-                  <tr
-                    key={ride.rideId}
-                    onClick={() => setDetailModalRide(ride)}
-                    className="cursor-pointer transition hover:bg-slate-50"
-                  >
-                    <td className="px-4 py-3 text-sm font-semibold text-slate-900">
-                      {ride.routeName}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-blue-700 text-xs font-semibold text-white">
-                          {getInitials(ride.driverName || "Driver")}
-                        </span>
-                        {ride.driverName}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      {formatDateDisplay(ride.date)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      {formatTimeTo12Hour(ride.departureTime)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      <RideStatusBadge status={ride.status} />
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      {availableCount}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      {ride.status === "active" || ride.status === "completed"
-                        ? ride.boardedCount || 0
-                        : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      <div
-                        className="flex flex-wrap gap-2"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setDetailModalRide(ride)}
-                          className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                  return (
+                    <tr
+                      key={ride.rideId}
+                      onClick={() => setDetailModalRide(ride)}
+                      className="cursor-pointer transition hover:bg-slate-50"
+                    >
+                      <td className="px-4 py-3 text-sm font-semibold text-slate-900">
+                        {ride.routeName}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-blue-700 text-xs font-semibold text-white">
+                            {getInitials(ride.driverName || "Driver")}
+                          </span>
+                          {ride.driverName}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        {formatDateDisplay(ride.date)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        {formatTimeTo12Hour(ride.departureTime)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        <RideStatusBadge status={ride.status} />
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        {availableCount}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        {ride.status === "active" || ride.status === "completed"
+                          ? ride.boardedCount || 0
+                          : "-"}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        <div
+                          className="flex flex-wrap gap-2"
+                          onClick={(event) => event.stopPropagation()}
                         >
-                          View Details
-                        </button>
-                        {ride.status === "scheduled" ? (
                           <button
                             type="button"
-                            onClick={() => setCancelRideTarget(ride)}
-                            className="rounded-md border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
+                            onClick={() => setDetailModalRide(ride)}
+                            className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                           >
-                            Cancel Ride
+                            View Details
                           </button>
-                        ) : null}
-                        {ride.status === "active" ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleMarkCompleted(ride)}
-                            className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white transition hover:bg-emerald-700"
-                          >
-                            Mark Completed
-                          </button>
-                        ) : null}
-                      </div>
+                          {ride.status === "scheduled" ? (
+                            <button
+                              type="button"
+                              onClick={() => setCancelRideTarget(ride)}
+                              className="rounded-md border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
+                            >
+                              Cancel Ride
+                            </button>
+                          ) : null}
+                          {ride.status === "active" ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleMarkCompleted(ride)}
+                              className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white transition hover:bg-emerald-700"
+                            >
+                              Mark Completed
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {filteredAllRides.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      className="px-4 py-8 text-center text-sm text-slate-500"
+                    >
+                      No rides found for selected filters.
                     </td>
                   </tr>
-                );
-              })}
-
-              {filteredAllRides.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="px-4 py-8 text-center text-sm text-slate-500"
-                  >
-                    No rides found for selected filters.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <CreateRideModal
@@ -820,6 +851,6 @@ export default function RidesPage() {
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }

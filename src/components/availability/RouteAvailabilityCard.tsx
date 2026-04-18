@@ -42,20 +42,20 @@ type RouteAvailabilityCardProps = {
 function getDriverStatusMeta(status: DriverStatus) {
   if (status === "available") {
     return {
-      label: "Available ✅",
+      label: "Available",
       classes: "bg-emerald-100 text-emerald-800",
     };
   }
 
   if (status === "not_available") {
     return {
-      label: "Not Available ❌",
+      label: "Not Available",
       classes: "bg-rose-100 text-rose-800",
     };
   }
 
   return {
-    label: "Not Responded ⏰",
+    label: "No Response",
     classes: "bg-amber-100 text-amber-800",
   };
 }
@@ -83,7 +83,7 @@ export default function RouteAvailabilityCard({
         <div>
           <h2 className="text-lg font-bold text-slate-900">{routeName}</h2>
           <p className="text-sm text-slate-600">
-            Departure: {formatTimeTo12Hour(departureTime)} • {totalStudents}{" "}
+            {formatTimeTo12Hour(departureTime)} departure • {totalStudents}{" "}
             students
           </p>
         </div>
@@ -94,7 +94,7 @@ export default function RouteAvailabilityCard({
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
           >
             <Download size={16} />
-            Export Route CSV
+            Export CSV
           </button>
           <button
             onClick={onSendReminder}
@@ -102,14 +102,14 @@ export default function RouteAvailabilityCard({
             className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
           >
             <Bell size={16} />
-            Send Reminder to Non-Respondents
+            Send Reminder
           </button>
           <button
             onClick={onToggleExpanded}
             className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
           >
             {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            {expanded ? "Collapse" : "Expand"}
+            {expanded ? "Hide Details" : "Show Details"}
           </button>
         </div>
       </header>
@@ -149,16 +149,16 @@ export default function RouteAvailabilityCard({
             <>
               {driver.note ? (
                 <p className="mt-3 text-sm text-rose-700">
-                  Note: {driver.note}
+                  Driver note: {driver.note}
                 </p>
               ) : null}
               {driver.vehicleAvailable === false ? (
                 <p className="mt-1 text-sm font-medium text-rose-700">
-                  Vehicle: Unavailable
+                  Vehicle unavailable
                 </p>
               ) : null}
               <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
-                This route needs a backup driver tomorrow
+                Backup driver required
               </div>
             </>
           ) : null}
@@ -180,7 +180,7 @@ export default function RouteAvailabilityCard({
                 onClick={onToggleSort}
                 className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600 transition hover:bg-white print:hidden"
               >
-                Sort Status: {sortAscending ? "A to Z" : "Z to A"}
+                Sort: {sortAscending ? "A to Z" : "Z to A"}
               </button>
             </div>
             <div className="overflow-x-auto">

@@ -4,7 +4,11 @@ import {
   setPersistence,
   browserLocalPersistence,
 } from "firebase/auth";
-import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+import {
+  getFirestore,
+  enableIndexedDbPersistence,
+  enableMultiTabIndexedDbPersistence,
+} from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
@@ -24,7 +28,9 @@ export const storage = getStorage(app);
 
 if (typeof window !== "undefined") {
   setPersistence(auth, browserLocalPersistence).catch(console.error);
-  enableIndexedDbPersistence(db).catch(() => {});
+  enableMultiTabIndexedDbPersistence(db)
+    .catch(() => enableIndexedDbPersistence(db))
+    .catch(() => {});
 }
 
 export default app;
