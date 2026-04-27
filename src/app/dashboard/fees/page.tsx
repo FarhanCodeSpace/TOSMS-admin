@@ -309,9 +309,6 @@ export default function FeesPage() {
         if (monthlyFeeAmount <= 0) {
           return null;
         }
-
-        const payment = allPayments.find((p) => p.studentId === student.uid);
-        const route = routes.find((r) => r.routeId === student.routeId);
         const monthStart = new Date(`${selectedMonth}-01`);
         const daysSinceStart = Math.floor(
           (new Date().getTime() - monthStart.getTime()) / (1000 * 60 * 60 * 24),

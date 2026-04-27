@@ -19,7 +19,7 @@ import Image from "next/image";
 type PaymentCardProps = {
   payment: FeePayment;
   studentAvatar?: string;
-  onReceiptView?: (receiptUrl: string) => void;
+  onReceiptView?: (_receiptUrl: string) => void;
 };
 
 export default function PaymentCard({
