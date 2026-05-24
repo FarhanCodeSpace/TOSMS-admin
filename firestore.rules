@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && getUserData().role == 'admin';
+    }
+    
+    function isDriver() {
+      return isSignedIn() && getUserData().role == 'driver';
+    }
+    
+    function isStudent() {
+      return isSignedIn() && getUserData().role == 'student';
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Allow reading own profile or if the requester is an admin
+      allow read: if isSignedIn() && (isOwner(userId) || isAdmin());
+      // Allow admins to see all users (needed for driver/student management)
+      allow list: if isAdmin();
+      // Only admins or the owner can update the profile
+      allow write: if isAdmin() || isOwner(userId);
+    }
+
+    // Routes collection
+    match /routes/{routeId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Rides collection
+    match /rides/{rideId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Availability collection
+    match /availability/{availId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn(); 
+    }
+
+    // Fee Payments
+    match /feePayments/{paymentId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // Challans
+    match /challans/{challanId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // Live Locations
+    match /liveLocations/{locationId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (isDriver() || isAdmin());
+    }
+
+    // Reviews
+    match /reviews/{reviewId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isStudent();
+      allow update, delete: if isAdmin();
+    }
+
+    // Settings
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Admin Notifications
+    match /adminNotifications/{notificationId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+  }
+}

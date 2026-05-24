@@ -97,21 +97,15 @@ function isLogoutPermissionError(error: unknown): boolean {
 }
 
 export default function AvailabilityPage() {
-  const [selectedDate, setSelectedDate] = useState<Date>(
-    addDays(new Date(), 1),
-  );
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [liveUpdates, setLiveUpdates] = useState(true);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [driverAvailability, setDriverAvailability] = useState<
-    AvailabilityRecord[]
-  >([]);
-  const [studentAvailability, setStudentAvailability] = useState<
-    AvailabilityRecord[]
-  >([]);
+  const [allAvailability, setAllAvailability] = useState<AvailabilityRecord[]>(
+    [],
+  );
   const [isLoading, setIsLoading] = useState(true);
-  const [driverLoading, setDriverLoading] = useState(true);
-  const [studentLoading, setStudentLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [expandedByRoute, setExpandedByRoute] = useState<
@@ -169,19 +163,15 @@ export default function AvailabilityPage() {
           .filter((user) => user.role === "student" || user.role === "driver"),
       );
 
-      const allAvailability = availabilitySnap.docs.map((availabilityDoc) => ({
+      const availabilityData = availabilitySnap.docs.map((availabilityDoc) => ({
         ...(availabilityDoc.data() as AvailabilityRecord),
         availabilityId:
           (availabilityDoc.data() as Partial<AvailabilityRecord>)
             .availabilityId || availabilityDoc.id,
       }));
 
-      setDriverAvailability(allAvailability.filter((a) => a.role === "driver"));
-      setStudentAvailability(
-        allAvailability.filter((a) => a.role === "student"),
-      );
-      setDriverLoading(false);
-      setStudentLoading(false);
+      setAllAvailability(availabilityData);
+      setDataLoading(false);
 
       setLastUpdated(new Date());
     } catch (error) {
@@ -205,16 +195,14 @@ export default function AvailabilityPage() {
     }
 
     setIsLoading(true);
-    setDriverLoading(true);
-    setStudentLoading(true);
+    setDataLoading(true);
 
     let hasRoutes = false;
     let hasUsers = false;
-    let hasDrivers = false;
-    let hasStudents = false;
+    let hasAvailability = false;
 
     const markLoaded = () => {
-      if (hasRoutes && hasUsers && hasDrivers && hasStudents) {
+      if (hasRoutes && hasUsers && hasAvailability) {
         setIsLoading(false);
       }
     };
@@ -261,75 +249,57 @@ export default function AvailabilityPage() {
       },
     );
 
-    // Listener 1 — Driver availability only
-    const unsubscribeDrivers = onSnapshot(
+    // Single Listener for all availability on the selected date
+    const unsubscribeAvailability = onSnapshot(
       query(
         collection(db, COLLECTIONS.AVAILABILITY),
         where("date", "==", selectedDateKey),
-        where("role", "==", "driver"),
       ),
       (snapshot) => {
-        hasDrivers = true;
-        const driverData: AvailabilityRecord[] = snapshot.docs.map((doc) => ({
+        hasAvailability = true;
+        const allData = snapshot.docs.map((doc) => ({
           ...(doc.data() as AvailabilityRecord),
           availabilityId: doc.id,
         }));
-        setDriverAvailability(driverData);
-        setDriverLoading(false);
-        setLastUpdated(new Date());
-        markLoaded();
-      },
-      (error) => {
-        if (isLogoutPermissionError(error)) return;
-        console.error("Error subscribing driver availability:", error);
-      },
-    );
 
-    // Listener 2 — Student availability only
-    const unsubscribeStudents = onSnapshot(
-      query(
-        collection(db, COLLECTIONS.AVAILABILITY),
-        where("date", "==", selectedDateKey),
-        where("role", "==", "student"),
-      ),
-      (snapshot) => {
-        hasStudents = true;
-        const studentData: AvailabilityRecord[] = snapshot.docs.map((doc) => ({
-          ...(doc.data() as AvailabilityRecord),
-          availabilityId: doc.id,
-        }));
-        setStudentAvailability(studentData);
-        setStudentLoading(false);
+        setAllAvailability(allData);
+        setDataLoading(false);
         setLastUpdated(new Date());
         markLoaded();
       },
       (error) => {
         if (isLogoutPermissionError(error)) return;
-        console.error("Error subscribing student availability:", error);
+        console.error("Error subscribing availability:", error);
+        toast.error("Live availability updates failed");
+        setDataLoading(false);
+        markLoaded();
       },
     );
 
     return () => {
       unsubscribeRoutes();
       unsubscribeUsers();
-      unsubscribeDrivers();
-      unsubscribeStudents();
+      unsubscribeAvailability();
     };
   }, [liveUpdates, selectedDateKey, loadSnapshotDataOnce]);
-
-  const availabilityRecords = useMemo(() => {
-    return [...driverAvailability, ...studentAvailability];
-  }, [driverAvailability, studentAvailability]);
 
   const routeReports = useMemo<RouteReport[]>(() => {
     const usersById = new Map(users.map((user) => [user.uid, user]));
     const availabilityByCompositeKey = new Map<string, AvailabilityRecord>();
 
-    availabilityRecords.forEach((record) => {
+    allAvailability.forEach((record) => {
+      // Primary key: user_route_role
       availabilityByCompositeKey.set(
         `${record.userId}_${record.routeId}_${record.role}`,
         record,
       );
+      // Fallback key: user_role (in case routeId is missing or mismatch in record)
+      if (!record.routeId || record.routeId === "") {
+        availabilityByCompositeKey.set(
+          `${record.userId}_${record.role}`,
+          record,
+        );
+      }
     });
 
     return routes.map((route) => {
@@ -338,11 +308,15 @@ export default function AvailabilityPage() {
       const driverUser = route.assignedDriverId
         ? usersById.get(route.assignedDriverId)
         : undefined;
+
+      // Try specific key first, then fallback
       const driverRecord = route.assignedDriverId
         ? availabilityByCompositeKey.get(
             `${route.assignedDriverId}_${route.routeId}_driver`,
-          )
+          ) ||
+          availabilityByCompositeKey.get(`${route.assignedDriverId}_driver`)
         : undefined;
+
       const driverStatus = route.assignedDriverId
         ? (getStatusFromRecord(driverRecord) as DriverStatus)
         : "no_response";
@@ -350,9 +324,11 @@ export default function AvailabilityPage() {
       const students = (route.studentIds || [])
         .map((studentId) => {
           const studentUser = usersById.get(studentId);
-          const availabilityRecord = availabilityByCompositeKey.get(
-            `${studentId}_${route.routeId}_student`,
-          );
+          // Try specific key first, then fallback
+          const availabilityRecord =
+            availabilityByCompositeKey.get(
+              `${studentId}_${route.routeId}_student`,
+            ) || availabilityByCompositeKey.get(`${studentId}_student`);
 
           return {
             userId: studentId,
@@ -386,8 +362,10 @@ export default function AvailabilityPage() {
       // Find last updated for this route
       const relevantRecords = [
         driverRecord,
-        ...(route.studentIds || []).map((sid) =>
-          availabilityByCompositeKey.get(`${sid}_${route.routeId}_student`),
+        ...(route.studentIds || []).map(
+          (sid) =>
+            availabilityByCompositeKey.get(`${sid}_${route.routeId}_student`) ||
+            availabilityByCompositeKey.get(`${sid}_student`),
         ),
       ].filter(Boolean) as AvailabilityRecord[];
 
@@ -426,7 +404,7 @@ export default function AvailabilityPage() {
         lastUpdated: routeLastUpdated,
       };
     });
-  }, [availabilityRecords, routes, sortAscByRoute, users]);
+  }, [allAvailability, routes, sortAscByRoute, users]);
 
   const summary = useMemo(() => {
     let available = 0;
@@ -562,7 +540,7 @@ export default function AvailabilityPage() {
     try {
       setSendingReminderRouteId(report.route.routeId);
 
-      const existingNoResponseRecords = availabilityRecords.filter(
+      const existingNoResponseRecords = allAvailability.filter(
         (record) =>
           record.routeId === report.route.routeId &&
           record.date === selectedDateKey &&
@@ -869,8 +847,8 @@ export default function AvailabilityPage() {
                   sendingReminderRouteId === report.route.routeId ||
                   report.noResponseStudentIds.length === 0
                 }
-                driverLoading={driverLoading}
-                studentLoading={studentLoading}
+                driverLoading={dataLoading}
+                studentLoading={dataLoading}
                 lastUpdated={report.lastUpdated}
               />
             );

@@ -119,10 +119,13 @@ export default function DriversPage() {
         }
       },
       (error) => {
-        if (error.code !== "permission-denied") {
-          console.error("Drivers onSnapshot error:", error);
+        console.error("Drivers onSnapshot error:", error);
+        if (error.code === "permission-denied") {
+          toast.error("Permission denied: Check Firestore rules");
+        } else {
           toast.error("Failed to fetch drivers");
         }
+        setLoading(false);
       },
     );
     return () => unsubscribe();

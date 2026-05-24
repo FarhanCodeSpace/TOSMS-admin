@@ -58,10 +58,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         setCurrentUser({ ...(userData as User) });
         setError(null);
-      } catch (fetchError) {
+      } catch (fetchError: any) {
         console.error("Auth user load failed:", fetchError);
         setCurrentUser(null);
-        setError("Unable to verify admin session.");
+        if (fetchError?.code === "permission-denied") {
+          setError("Permission denied. Please check Firestore Security Rules.");
+        } else {
+          setError("Unable to verify admin session.");
+        }
         document.cookie = "tosms_admin_auth=; path=/; max-age=0";
       } finally {
         setIsLoading(false);
