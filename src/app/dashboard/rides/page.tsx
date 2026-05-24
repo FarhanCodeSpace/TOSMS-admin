@@ -576,7 +576,7 @@ export default function RidesPage() {
       <section className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-[var(--text)]">
-            Today&apos;s Rides
+            {"Today's Rides"}
           </h2>
           <p className="text-sm font-semibold text-[var(--text-secondary)]">
             {formatDateDisplay(todayString)}
@@ -602,7 +602,7 @@ export default function RidesPage() {
               >
                 {isCreatingTodayAll
                   ? "Creating..."
-                  : "Create All Today&apos;s Rides"}
+                  : "Create All Today's Rides"}
               </button>
             </div>
           </div>

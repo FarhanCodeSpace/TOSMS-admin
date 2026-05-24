@@ -17,7 +17,6 @@ import {
   Users,
   GraduationCap,
   LogOut,
-  HelpCircle,
   Bell,
 } from "lucide-react";
 import { signOut } from "firebase/auth";
@@ -86,7 +85,7 @@ export default function Sidebar({
     );
 
     allRoutes.forEach((href) => {
-      router.prefetch(href);
+      router.prefetch(href as any);
     });
   }, [router]);
 
@@ -106,57 +105,43 @@ export default function Sidebar({
 
   return (
     <>
+      {/* Mobile Backdrop */}
       {mobileOpen && (
-        <button
-          type="button"
-          aria-label="Close menu"
+        <div
+          className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm lg:hidden"
           onClick={onCloseMobile}
-          className="fixed inset-0 z-20 bg-black/50 lg:hidden"
         />
       )}
+
+      {/* Sidebar Container */}
       <aside
         className={cn(
-          "fixed left-0 top-0 z-30 flex h-screen flex-col",
-          "border-r border-[var(--border)]",
-          "bg-[var(--surface)]",
-          "text-[var(--text)]",
-          "shadow-lg",
-          "transition-all duration-300",
+          "fixed left-0 top-0 z-40 h-full border-r bg-[var(--surface)] text-[var(--text)] transition-all duration-300 ease-in-out flex flex-col",
           collapsed ? "w-20" : "w-64",
-          mobileOpen ? "translate-x-0" : "-translate-x-full",
-          "lg:translate-x-0",
+          mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         )}
       >
-        {/* Logo Area */}
-        <div
-          className={cn(
-            "flex items-center justify-between px-6 py-6",
-            collapsed && "px-3",
-          )}
-        >
+        {/* Logo Section */}
+        <div className="px-6 py-5 border-b border-[var(--border)]">
           <div className="flex items-center gap-3">
-            <div
-              className={cn(
-                "flex items-center justify-center rounded-lg",
-                "bg-[var(--primary)] text-white",
-                collapsed ? "h-10 w-10" : "h-12 w-12",
-              )}
-            >
-              <Bus className={collapsed ? "w-5 h-5" : "w-6 h-6"} />
+            <div className="w-8 h-8 bg-gradient-to-br from-[#1A3C5E] to-[#2563EB] rounded-lg flex items-center justify-center shrink-0">
+              <span className="text-white font-black text-sm">T</span>
             </div>
             {!collapsed && (
-              <div className="flex items-center gap-1">
-                <span className="text-xl font-bold text-[var(--primary)]">
+              <div className="min-w-0">
+                <h1 className="text-[var(--text)] font-bold text-base leading-tight">
                   TOSMS
-                </span>
-                <span className="w-2 h-2 rounded-full bg-[var(--accent)]"></span>
+                </h1>
+                <p className="text-[#F5A623] text-[10px] font-medium leading-tight tracking-wide whitespace-nowrap">
+                  Smart Transport, Safe Journey
+                </p>
               </div>
             )}
           </div>
         </div>
 
         {!collapsed && (
-          <div className="px-6 pb-4">
+          <div className="px-6 py-6">
             <p className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
               Admin Portal
             </p>
@@ -165,7 +150,7 @@ export default function Sidebar({
         )}
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6 scrollbar-thin scrollbar-thumb-[var(--border)] scrollbar-track-transparent">
           {navigationSections.map((section) => (
             <div key={section.label}>
               {!collapsed && (
@@ -181,7 +166,7 @@ export default function Sidebar({
                   return (
                     <Link
                       key={item.href}
-                      href={item.href}
+                      href={item.href as any}
                       onClick={() => {
                         if (!active) {
                           onNavigateStart?.();
@@ -190,8 +175,8 @@ export default function Sidebar({
                           onCloseMobile();
                         }
                       }}
-                      onMouseEnter={() => router.prefetch(item.href)}
-                      onFocus={() => router.prefetch(item.href)}
+                      onMouseEnter={() => router.prefetch(item.href as any)}
+                      onFocus={() => router.prefetch(item.href as any)}
                       className={cn(
                         "flex items-center gap-3 rounded-md px-3 py-2",
                         "transition-all duration-200",

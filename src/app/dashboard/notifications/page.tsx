@@ -1,13 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  collection,
-  onSnapshot,
-  query,
-  where,
-  orderBy,
-} from "firebase/firestore";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 import {
   AlertCircle,
   CheckCircle,
@@ -18,7 +12,6 @@ import {
 
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
-import { useAuth } from "@/context/AuthContext";
 import SkeletonLoader from "@/components/ui/SkeletonLoader";
 import EmptyState from "@/components/ui/EmptyState";
 import NotificationCard from "@/components/notifications/NotificationCard";
@@ -59,14 +52,7 @@ interface PendingFee {
   submittedAt: Date;
 }
 
-interface UnassignedStudent {
-  id: string;
-  fullName: string;
-  email?: string;
-}
-
 export default function NotificationsPage() {
-  const { currentUser } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filterType, setFilterType] = useState<string>("all");
@@ -343,7 +329,6 @@ export default function NotificationsPage() {
             {sortedNotifications.map((notification) => (
               <NotificationCard
                 key={notification.id}
-                id={notification.id}
                 title={notification.title}
                 description={notification.description}
                 icon={notification.icon}

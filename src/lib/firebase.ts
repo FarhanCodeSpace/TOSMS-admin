@@ -28,9 +28,22 @@ export const storage = getStorage(app);
 
 if (typeof window !== "undefined") {
   setPersistence(auth, browserLocalPersistence).catch(console.error);
-  enableMultiTabIndexedDbPersistence(db)
-    .catch(() => enableIndexedDbPersistence(db))
-    .catch(() => {});
+
+  // Use a safer initialization for persistence
+  // enableMultiTabIndexedDbPersistence is preferred but can throw if already enabled
+  enableMultiTabIndexedDbPersistence(db).catch((err) => {
+    if (err.code === "failed-precondition") {
+      // This is expected if multiple tabs are open and multi-tab is not supported
+      // or if it's already enabled.
+      console.debug(
+        "Firestore persistence already enabled or precondition failed.",
+      );
+    } else if (err.code === "unimplemented") {
+      console.warn("Firestore persistence is not supported by this browser.");
+    } else {
+      console.error("Firestore persistence error:", err);
+    }
+  });
 }
 
 export default app;

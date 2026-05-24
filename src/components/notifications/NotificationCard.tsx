@@ -9,7 +9,6 @@ import Badge from "@/components/ui/Badge";
 import { cn } from "@/lib/utils";
 
 interface NotificationCardProps {
-  id: string;
   title: string;
   description: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -66,7 +65,6 @@ const formatTimeAgo = (date: Date) => {
 };
 
 export default function NotificationCard({
-  id,
   title,
   description,
   icon: IconComponent,
@@ -97,7 +95,7 @@ export default function NotificationCard({
             <Badge
               variant={
                 severity === "critical"
-                  ? "destructive"
+                  ? "error"
                   : severity === "warning"
                     ? "warning"
                     : "default"
@@ -113,8 +111,8 @@ export default function NotificationCard({
               {formatTimeAgo(timestamp)}
             </span>
             {actionLink && (
-              <Link href={actionLink}>
-                <Button size="sm" variant="outline" className="gap-2">
+              <Link href={actionLink as any}>
+                <Button size="sm" variant="ghost" className="gap-2">
                   {actionLabel}
                   <AlertCircle className="w-4 h-4" />
                 </Button>

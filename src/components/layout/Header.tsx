@@ -7,6 +7,7 @@ import { signOut } from "firebase/auth";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import NotificationBell from "@/components/admin/NotificationBell";
 import { useAuth } from "@/context/AuthContext";
 import { db, auth } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
@@ -117,10 +118,6 @@ export default function Header({ onToggleMobileMenu }: HeaderProps) {
     setShowProfileMenu(false);
   }, [pathname]);
 
-  const handleNotificationsAction = () => {
-    router.push("/dashboard/notifications");
-  };
-
   const handleLogout = () => {
     document.cookie = "tosms_admin_auth=; path=/; max-age=0";
     router.replace("/login");
@@ -186,30 +183,7 @@ export default function Header({ onToggleMobileMenu }: HeaderProps) {
           <ThemeToggle />
 
           {/* Notifications */}
-          <button
-            type="button"
-            onClick={handleNotificationsAction}
-            aria-label="Open notifications"
-            className={cn(
-              "relative inline-flex items-center justify-center h-10 w-10 rounded-lg",
-              "text-[var(--text-muted)] hover:text-[var(--text)]",
-              "hover:bg-[var(--surface-secondary)]",
-              "transition-colors duration-200",
-            )}
-          >
-            <Bell className="h-5 w-5" />
-            {notificationCount > 0 && (
-              <span
-                className={cn(
-                  "absolute -right-1 -top-1 inline-flex h-5 min-w-[1.25rem] px-1 items-center justify-center",
-                  "rounded-full bg-[var(--error)] text-white",
-                  "text-xs font-bold",
-                )}
-              >
-                {notificationCount > 99 ? "99+" : notificationCount}
-              </span>
-            )}
-          </button>
+          <NotificationBell />
 
           {/* Admin Avatar and Dropdown */}
           <div ref={profileMenuRef} className="relative">

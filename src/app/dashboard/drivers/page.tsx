@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import Image from "next/image";
 import {
   collection,
@@ -9,6 +9,8 @@ import {
   where,
   updateDoc,
   doc,
+  writeBatch,
+  serverTimestamp,
 } from "firebase/firestore";
 import { Users, AlertCircle, Search, Loader2 } from "lucide-react";
 import { Download } from "lucide-react";
@@ -16,6 +18,7 @@ import toast from "react-hot-toast";
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
 import type { User, Route } from "@/types";
+import { useAuth } from "@/context/AuthContext";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import Modal from "@/components/ui/Modal";
 import SkeletonLoader from "@/components/ui/SkeletonLoader";
@@ -28,6 +31,7 @@ import { deleteDriverAccount } from "@/utils/firestoreHelpers";
 type TabType = "all" | "pending" | "approved" | "suspended";
 
 export default function DriversPage() {
+  const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>("pending");
   const [allDrivers, setAllDrivers] = useState<User[]>([]);
   const [pendingDrivers, setPendingDrivers] = useState<User[]>([]);
@@ -67,9 +71,12 @@ export default function DriversPage() {
   });
 
   const itemsPerPage = 15;
+  const hasAutoSwitchedTab = useRef(false);
 
   // Fetch routes
   useEffect(() => {
+    if (!currentUser) return;
+
     const unsubscribe = onSnapshot(
       collection(db, COLLECTIONS.ROUTES),
       (snapshot) => {
@@ -80,10 +87,12 @@ export default function DriversPage() {
       },
     );
     return () => unsubscribe();
-  }, []);
+  }, [currentUser]);
 
   // Fetch all drivers
   useEffect(() => {
+    if (!currentUser) return;
+
     setLoading(true);
     const unsubscribe = onSnapshot(
       query(collection(db, COLLECTIONS.USERS), where("role", "==", "driver")),
@@ -92,7 +101,9 @@ export default function DriversPage() {
 
         // Categorize drivers
         const pending = drivers.filter(
-          (d) => d.approved === false && d.profileComplete === true,
+          (d) =>
+            (d.approved === false || d.approved === undefined) &&
+            d.profileComplete === true,
         );
         const suspended = drivers.filter((d) => d.status === "suspended");
 
@@ -101,18 +112,35 @@ export default function DriversPage() {
         setSuspendedDrivers(suspended);
         setLoading(false);
 
-        // Set default tab to pending if there are pending drivers
-        if (pending.length > 0 && activeTab === "all") {
+        // Set default tab to pending if there are pending drivers (only on first load)
+        if (pending.length > 0 && !hasAutoSwitchedTab.current) {
           setActiveTab("pending");
+          hasAutoSwitchedTab.current = true;
+        }
+      },
+      (error) => {
+        if (error.code !== "permission-denied") {
+          console.error("Drivers onSnapshot error:", error);
+          toast.error("Failed to fetch drivers");
         }
       },
     );
     return () => unsubscribe();
-  }, [activeTab]);
+  }, [currentUser]);
 
   // Calculate filtered results
   const filteredDrivers = useMemo(() => {
-    let filtered = allDrivers;
+    let filtered = allDrivers.filter(
+      (d) => d.approved === true && d.status !== "suspended",
+    );
+
+    if (activeTab === "suspended") {
+      filtered = suspendedDrivers;
+    } else if (activeTab === "pending") {
+      filtered = pendingDrivers;
+    } else if (activeTab === "all") {
+      filtered = allDrivers;
+    }
 
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
@@ -129,7 +157,14 @@ export default function DriversPage() {
     }
 
     return filtered;
-  }, [allDrivers, searchTerm, vehicleFilter]);
+  }, [
+    allDrivers,
+    pendingDrivers,
+    suspendedDrivers,
+    activeTab,
+    searchTerm,
+    vehicleFilter,
+  ]);
 
   const paginatedDrivers = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
@@ -142,14 +177,22 @@ export default function DriversPage() {
   const handleApproveDriver = async (driver: User) => {
     try {
       setActionLoading(true);
-      await updateDoc(doc(db, COLLECTIONS.USERS, driver.uid), {
+      const batch = writeBatch(db);
+
+      // Update user document
+      const userRef = doc(db, COLLECTIONS.USERS, driver.uid);
+      batch.update(userRef, {
         approved: true,
+        status: "active",
+        approvedAt: serverTimestamp(),
       });
+
+      await batch.commit();
       toast.success("Driver approved! They can now access the app.");
       setConfirmDialog({ open: false, type: null, driver: null });
     } catch (error) {
       console.error("Error approving driver:", error);
-      toast.error("Failed to approve driver");
+      toast.error("Failed to approve driver. Please try again.");
     } finally {
       setActionLoading(false);
     }

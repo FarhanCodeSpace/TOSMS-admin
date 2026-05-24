@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
-import { ReactNode } from "react";
+import React, { ReactNode } from "react";
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "ghost" | "danger" | "success";

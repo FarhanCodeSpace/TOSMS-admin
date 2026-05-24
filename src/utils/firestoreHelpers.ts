@@ -52,28 +52,48 @@ export const assignStudentToRoute = async (
   studentId: string,
   routeId: string,
   pickupStop: string,
+  previousRouteId?: string,
 ): Promise<void> => {
-  await updateDoc(doc(db, COLLECTIONS.ROUTES, routeId), {
+  const batch = writeBatch(db);
+
+  // Remove from previous route if exists
+  if (previousRouteId) {
+    batch.update(doc(db, COLLECTIONS.ROUTES, previousRouteId), {
+      studentIds: arrayRemove(studentId),
+    });
+  }
+
+  // Add to new route
+  batch.update(doc(db, COLLECTIONS.ROUTES, routeId), {
     studentIds: arrayUnion(studentId),
   });
-  await updateDoc(doc(db, COLLECTIONS.USERS, studentId), {
+
+  // Update student document
+  batch.update(doc(db, COLLECTIONS.USERS, studentId), {
     routeId,
     pickupStop,
   });
+
+  await batch.commit();
 };
 
-// Remove student from route — updates BOTH documents
+// Remove student from route — updates BOTH documents atomically
 export const removeStudentFromRoute = async (
   studentId: string,
   routeId: string,
 ): Promise<void> => {
-  await updateDoc(doc(db, COLLECTIONS.ROUTES, routeId), {
+  const batch = writeBatch(db);
+
+  batch.update(doc(db, COLLECTIONS.ROUTES, routeId), {
     studentIds: arrayRemove(studentId),
   });
-  await updateDoc(doc(db, COLLECTIONS.USERS, studentId), {
+
+  batch.update(doc(db, COLLECTIONS.USERS, studentId), {
     routeId: "",
     pickupStop: "",
   });
+
+  await batch.commit();
 };
 
 // Delete student account and clean route/availability relationships.

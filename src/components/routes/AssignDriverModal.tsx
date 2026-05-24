@@ -70,10 +70,10 @@ export default function AssignDriverModal({
 
         const routesMap = new Map<string, string>();
         routesSnap.docs.forEach((routeDoc) => {
-          const data = routeDoc.data() as Partial<Route>;
+          const data = routeDoc.data();
           routesMap.set(
             routeDoc.id,
-            data.routeName || data.name || "Unnamed Route",
+            data.routeName || "Unnamed Route",
           );
         });
 

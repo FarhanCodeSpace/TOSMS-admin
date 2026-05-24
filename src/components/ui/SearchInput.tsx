@@ -1,6 +1,6 @@
-import { cn } from "@/lib/utils";
+import React, { InputHTMLAttributes, useState } from "react";
 import { Search, X } from "lucide-react";
-import { InputHTMLAttributes, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 
 interface SearchInputProps extends InputHTMLAttributes<HTMLInputElement> {
   placeholder?: string;

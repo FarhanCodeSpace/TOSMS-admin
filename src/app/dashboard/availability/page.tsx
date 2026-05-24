@@ -59,6 +59,7 @@ type RouteReport = {
     noResponse: number;
   };
   noResponseStudentIds: string[];
+  lastUpdated?: Date | null;
 };
 
 const STATUS_RANK: Record<StudentAvailabilityRowData["status"], number> = {
@@ -102,10 +103,15 @@ export default function AvailabilityPage() {
   const [liveUpdates, setLiveUpdates] = useState(true);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [availabilityRecords, setAvailabilityRecords] = useState<
+  const [driverAvailability, setDriverAvailability] = useState<
+    AvailabilityRecord[]
+  >([]);
+  const [studentAvailability, setStudentAvailability] = useState<
     AvailabilityRecord[]
   >([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [driverLoading, setDriverLoading] = useState(true);
+  const [studentLoading, setStudentLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [expandedByRoute, setExpandedByRoute] = useState<
@@ -163,14 +169,19 @@ export default function AvailabilityPage() {
           .filter((user) => user.role === "student" || user.role === "driver"),
       );
 
-      setAvailabilityRecords(
-        availabilitySnap.docs.map((availabilityDoc) => ({
-          ...(availabilityDoc.data() as AvailabilityRecord),
-          availabilityId:
-            (availabilityDoc.data() as Partial<AvailabilityRecord>)
-              .availabilityId || availabilityDoc.id,
-        })),
+      const allAvailability = availabilitySnap.docs.map((availabilityDoc) => ({
+        ...(availabilityDoc.data() as AvailabilityRecord),
+        availabilityId:
+          (availabilityDoc.data() as Partial<AvailabilityRecord>)
+            .availabilityId || availabilityDoc.id,
+      }));
+
+      setDriverAvailability(allAvailability.filter((a) => a.role === "driver"));
+      setStudentAvailability(
+        allAvailability.filter((a) => a.role === "student"),
       );
+      setDriverLoading(false);
+      setStudentLoading(false);
 
       setLastUpdated(new Date());
     } catch (error) {
@@ -194,13 +205,16 @@ export default function AvailabilityPage() {
     }
 
     setIsLoading(true);
+    setDriverLoading(true);
+    setStudentLoading(true);
 
     let hasRoutes = false;
     let hasUsers = false;
-    let hasAvailability = false;
+    let hasDrivers = false;
+    let hasStudents = false;
 
     const markLoaded = () => {
-      if (hasRoutes && hasUsers && hasAvailability) {
+      if (hasRoutes && hasUsers && hasDrivers && hasStudents) {
         setIsLoading(false);
       }
     };
@@ -215,7 +229,6 @@ export default function AvailabilityPage() {
             routeId: routeDoc.id,
           })),
         );
-        setLastUpdated(new Date());
         markLoaded();
       },
       (error) => {
@@ -239,7 +252,6 @@ export default function AvailabilityPage() {
               (user) => user.role === "student" || user.role === "driver",
             ),
         );
-        setLastUpdated(new Date());
         markLoaded();
       },
       (error) => {
@@ -249,37 +261,65 @@ export default function AvailabilityPage() {
       },
     );
 
-    const unsubscribeAvailability = onSnapshot(
+    // Listener 1 — Driver availability only
+    const unsubscribeDrivers = onSnapshot(
       query(
         collection(db, COLLECTIONS.AVAILABILITY),
         where("date", "==", selectedDateKey),
+        where("role", "==", "driver"),
       ),
       (snapshot) => {
-        hasAvailability = true;
-        setAvailabilityRecords(
-          snapshot.docs.map((availabilityDoc) => ({
-            ...(availabilityDoc.data() as AvailabilityRecord),
-            availabilityId:
-              (availabilityDoc.data() as Partial<AvailabilityRecord>)
-                .availabilityId || availabilityDoc.id,
-          })),
-        );
+        hasDrivers = true;
+        const driverData: AvailabilityRecord[] = snapshot.docs.map((doc) => ({
+          ...(doc.data() as AvailabilityRecord),
+          availabilityId: doc.id,
+        }));
+        setDriverAvailability(driverData);
+        setDriverLoading(false);
         setLastUpdated(new Date());
         markLoaded();
       },
       (error) => {
         if (isLogoutPermissionError(error)) return;
-        console.error("Error subscribing availability:", error);
-        toast.error("Live availability updates failed");
+        console.error("Error subscribing driver availability:", error);
+      },
+    );
+
+    // Listener 2 — Student availability only
+    const unsubscribeStudents = onSnapshot(
+      query(
+        collection(db, COLLECTIONS.AVAILABILITY),
+        where("date", "==", selectedDateKey),
+        where("role", "==", "student"),
+      ),
+      (snapshot) => {
+        hasStudents = true;
+        const studentData: AvailabilityRecord[] = snapshot.docs.map((doc) => ({
+          ...(doc.data() as AvailabilityRecord),
+          availabilityId: doc.id,
+        }));
+        setStudentAvailability(studentData);
+        setStudentLoading(false);
+        setLastUpdated(new Date());
+        markLoaded();
+      },
+      (error) => {
+        if (isLogoutPermissionError(error)) return;
+        console.error("Error subscribing student availability:", error);
       },
     );
 
     return () => {
       unsubscribeRoutes();
       unsubscribeUsers();
-      unsubscribeAvailability();
+      unsubscribeDrivers();
+      unsubscribeStudents();
     };
   }, [liveUpdates, selectedDateKey, loadSnapshotDataOnce]);
+
+  const availabilityRecords = useMemo(() => {
+    return [...driverAvailability, ...studentAvailability];
+  }, [driverAvailability, studentAvailability]);
 
   const routeReports = useMemo<RouteReport[]>(() => {
     const usersById = new Map(users.map((user) => [user.uid, user]));
@@ -343,6 +383,24 @@ export default function AvailabilityPage() {
         (student) => student.status === "no_response",
       ).length;
 
+      // Find last updated for this route
+      const relevantRecords = [
+        driverRecord,
+        ...(route.studentIds || []).map((sid) =>
+          availabilityByCompositeKey.get(`${sid}_${route.routeId}_student`),
+        ),
+      ].filter(Boolean) as AvailabilityRecord[];
+
+      let routeLastUpdated: Date | null = null;
+      relevantRecords.forEach((r) => {
+        if (r.markedAt) {
+          const d = r.markedAt.toDate();
+          if (!routeLastUpdated || d > routeLastUpdated) {
+            routeLastUpdated = d;
+          }
+        }
+      });
+
       return {
         route,
         driver: {
@@ -365,6 +423,7 @@ export default function AvailabilityPage() {
         noResponseStudentIds: students
           .filter((student) => student.status === "no_response")
           .map((student) => student.userId),
+        lastUpdated: routeLastUpdated,
       };
     });
   }, [availabilityRecords, routes, sortAscByRoute, users]);
@@ -476,9 +535,7 @@ export default function AvailabilityPage() {
       header.join(","),
       [driverRow, ...studentRows]
         .map((row) =>
-          row
-            .map((cell) => `"${String(cell).replaceAll('"', '""')}"`)
-            .join(","),
+          row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
         )
         .join("\n"),
     ].join("\n");
@@ -812,6 +869,9 @@ export default function AvailabilityPage() {
                   sendingReminderRouteId === report.route.routeId ||
                   report.noResponseStudentIds.length === 0
                 }
+                driverLoading={driverLoading}
+                studentLoading={studentLoading}
+                lastUpdated={report.lastUpdated}
               />
             );
           })}

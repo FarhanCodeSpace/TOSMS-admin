@@ -1,12 +1,10 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { doc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 import toast from "react-hot-toast";
 import Modal from "@/components/ui/Modal";
 import { User, Route } from "@/types";
-import { db } from "@/lib/firebase";
-import { COLLECTIONS } from "@/lib/collections";
+import { assignStudentToRoute } from "@/utils/firestoreHelpers";
 
 type AssignStudentToRouteModalProps = {
   open: boolean;
@@ -45,23 +43,12 @@ export default function AssignStudentToRouteModal({
 
     setIsLoading(true);
     try {
-      // If student already has a route, remove them first
-      if (student.routeId) {
-        await updateDoc(doc(db, COLLECTIONS.ROUTES, student.routeId), {
-          studentIds: arrayRemove(student.uid),
-        });
-      }
-
-      // Add student to new route
-      await updateDoc(doc(db, COLLECTIONS.ROUTES, selectedRoute.routeId), {
-        studentIds: arrayUnion(student.uid),
-      });
-
-      // Update student document
-      await updateDoc(doc(db, COLLECTIONS.USERS, student.uid), {
-        routeId: selectedRoute.routeId,
-        pickupStop: selectedPickupStop,
-      });
+      await assignStudentToRoute(
+        student.uid,
+        selectedRoute.routeId,
+        selectedPickupStop,
+        student.routeId,
+      );
 
       toast.success(
         student.routeId

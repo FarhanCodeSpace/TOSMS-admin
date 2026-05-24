@@ -13,7 +13,8 @@ interface Tab {
 interface TabsProps {
   tabs: Tab[];
   defaultTabId?: string;
-  onChange?: (tabId: string) => void;
+  // eslint-disable-next-line no-unused-vars
+  onChange?: (id: string) => void;
   className?: string;
 }
 

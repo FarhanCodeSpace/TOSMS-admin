@@ -137,27 +137,19 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     };
 
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      const idleId = (
-        window as typeof window & {
-          requestIdleCallback: (cb: () => void) => number;
-          cancelIdleCallback: (id: number) => void;
-        }
-      ).requestIdleCallback(runWarmUp);
+      const win = window as any;
+      const idleId = win.requestIdleCallback(runWarmUp);
 
       return () => {
         cancelled = true;
-        (
-          window as typeof window & {
-            cancelIdleCallback: (id: number) => void;
-          }
-        ).cancelIdleCallback(idleId);
+        win.cancelIdleCallback(idleId);
       };
     }
 
-    const fallbackTimer = window.setTimeout(runWarmUp, 700);
+    const fallbackTimer = setTimeout(runWarmUp, 700);
     return () => {
       cancelled = true;
-      window.clearTimeout(fallbackTimer);
+      clearTimeout(fallbackTimer);
     };
   }, []);
 

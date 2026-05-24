@@ -8,4 +8,5 @@ export const COLLECTIONS = {
   LIVE_LOCATIONS: "liveLocations",
   REVIEWS: "reviews",
   SETTINGS: "settings",
+  NOTIFICATIONS: "adminNotifications",
 } as const;

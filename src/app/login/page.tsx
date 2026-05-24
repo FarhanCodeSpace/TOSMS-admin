@@ -8,7 +8,6 @@ import toast from "react-hot-toast";
 import { Mail, Lock, ArrowRight, Check } from "lucide-react";
 import { auth, db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
-import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 

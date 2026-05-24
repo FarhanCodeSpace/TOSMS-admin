@@ -1,12 +1,14 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Download, Bell } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, Bell, Clock } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 
 import { formatTimeTo12Hour, getInitials } from "@/utils/formatters";
 import AvailabilitySummaryBar from "@/components/availability/AvailabilitySummaryBar";
 import StudentAvailabilityRow, {
   StudentAvailabilityRowData,
 } from "@/components/availability/StudentAvailabilityRow";
+import SkeletonLoader from "@/components/ui/SkeletonLoader";
 
 type DriverStatus = "available" | "not_available" | "no_response";
 
@@ -37,6 +39,9 @@ type RouteAvailabilityCardProps = {
   onExportRouteCsv: () => void;
   onSendReminder: () => void;
   reminderDisabled: boolean;
+  driverLoading?: boolean;
+  studentLoading?: boolean;
+  lastUpdated?: Date | null;
 };
 
 function getDriverStatusMeta(status: DriverStatus) {
@@ -74,12 +79,15 @@ export default function RouteAvailabilityCard({
   onExportRouteCsv,
   onSendReminder,
   reminderDisabled,
+  driverLoading,
+  studentLoading,
+  lastUpdated,
 }: RouteAvailabilityCardProps) {
   const driverStatusMeta = getDriverStatusMeta(driver.status);
 
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-5 py-4">
+    <article className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-5 py-4 bg-white">
         <div>
           <h2 className="text-lg font-bold text-slate-900">{routeName}</h2>
           <p className="text-sm text-slate-600">
@@ -115,37 +123,48 @@ export default function RouteAvailabilityCard({
       </header>
 
       <div className="space-y-4 p-5">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              {driver.profileImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={driver.profileImageUrl}
-                  alt={driver.name}
-                  className="h-10 w-10 rounded-full border border-slate-200 object-cover"
-                />
-              ) : (
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 text-sm font-semibold text-sky-700">
-                  {getInitials(driver.name)}
-                </div>
-              )}
-              <div>
-                <p className="font-semibold text-slate-900">{driver.name}</p>
-                <p className="text-sm text-slate-600">
-                  {driver.phone || "No phone"}
-                </p>
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 relative">
+          {driverLoading ? (
+            <div className="animate-pulse flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-slate-200" />
+              <div className="flex-1 space-y-2">
+                <div className="h-4 w-1/4 bg-slate-200 rounded" />
+                <div className="h-3 w-1/6 bg-slate-200 rounded" />
               </div>
+              <div className="h-8 w-24 bg-slate-200 rounded-full" />
             </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                {driver.profileImageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={driver.profileImageUrl}
+                    alt={driver.name}
+                    className="h-10 w-10 rounded-full border border-slate-200 object-cover"
+                  />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 text-sm font-semibold text-sky-700">
+                    {getInitials(driver.name)}
+                  </div>
+                )}
+                <div>
+                  <p className="font-semibold text-slate-900">{driver.name}</p>
+                  <p className="text-sm text-slate-600">
+                    {driver.phone || "No phone"}
+                  </p>
+                </div>
+              </div>
 
-            <span
-              className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${driverStatusMeta.classes}`}
-            >
-              {driverStatusMeta.label}
-            </span>
-          </div>
+              <span
+                className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${driverStatusMeta.classes}`}
+              >
+                {driverStatusMeta.label}
+              </span>
+            </div>
+          )}
 
-          {driver.status === "not_available" ? (
+          {driver.status === "not_available" && !driverLoading ? (
             <>
               {driver.note ? (
                 <p className="mt-3 text-sm text-rose-700">
@@ -164,11 +183,24 @@ export default function RouteAvailabilityCard({
           ) : null}
         </div>
 
-        <AvailabilitySummaryBar
-          available={studentCounts.available}
-          notAvailable={studentCounts.notAvailable}
-          noResponse={studentCounts.noResponse}
-        />
+        {studentLoading ? (
+          <div className="space-y-3">
+            <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-full bg-slate-200 animate-pulse w-1/2" />
+            </div>
+            <div className="flex justify-between">
+              <div className="h-3 w-16 bg-slate-100 rounded animate-pulse" />
+              <div className="h-3 w-16 bg-slate-100 rounded animate-pulse" />
+              <div className="h-3 w-16 bg-slate-100 rounded animate-pulse" />
+            </div>
+          </div>
+        ) : (
+          <AvailabilitySummaryBar
+            available={studentCounts.available}
+            notAvailable={studentCounts.notAvailable}
+            noResponse={studentCounts.noResponse}
+          />
+        )}
 
         {expanded ? (
           <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -184,36 +216,53 @@ export default function RouteAvailabilityCard({
               </button>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-semibold">
-                      Student
-                    </th>
-                    <th className="px-3 py-2 text-left font-semibold">
-                      Pickup Stop
-                    </th>
-                    <th className="px-3 py-2 text-left font-semibold">
-                      Status
-                    </th>
-                    <th className="px-3 py-2 text-left font-semibold">Note</th>
-                    <th className="px-3 py-2 text-left font-semibold">
-                      Marked At
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {students.map((student) => (
-                    <StudentAvailabilityRow
-                      key={student.userId}
-                      student={student}
-                    />
-                  ))}
-                </tbody>
-              </table>
+              {studentLoading ? (
+                <div className="p-4 space-y-3">
+                  <SkeletonLoader variant="table" rows={3} />
+                </div>
+              ) : (
+                <table className="min-w-full">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">
+                        Student
+                      </th>
+                      <th className="px-3 py-2 text-left font-semibold">
+                        Pickup Stop
+                      </th>
+                      <th className="px-3 py-2 text-left font-semibold">
+                        Status
+                      </th>
+                      <th className="px-3 py-2 text-left font-semibold">
+                        Note
+                      </th>
+                      <th className="px-3 py-2 text-left font-semibold">
+                        Marked At
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {students.map((student) => (
+                      <StudentAvailabilityRow
+                        key={student.userId}
+                        student={student}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         ) : null}
+
+        {lastUpdated && (
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-2 italic">
+            <Clock size={10} />
+            <span>
+              Updated {formatDistanceToNow(lastUpdated, { addSuffix: true })}
+            </span>
+          </div>
+        )}
       </div>
     </article>
   );

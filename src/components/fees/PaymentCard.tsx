@@ -19,7 +19,8 @@ import Image from "next/image";
 type PaymentCardProps = {
   payment: FeePayment;
   studentAvatar?: string;
-  onReceiptView?: (_receiptUrl: string) => void;
+  // eslint-disable-next-line no-unused-vars
+  onReceiptView?: (url: string) => void;
 };
 
 export default function PaymentCard({

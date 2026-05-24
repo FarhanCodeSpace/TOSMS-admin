@@ -10,6 +10,7 @@ import {
   serverTimestamp,
   updateDoc,
   doc,
+  addDoc,
 } from "firebase/firestore";
 import {
   ChevronLeft,
@@ -175,6 +176,36 @@ export default function FeesPage() {
         where("month", "==", selectedMonth),
       ),
       (snapshot) => {
+        snapshot.docChanges().forEach(async (change) => {
+          if (change.type === "added") {
+            const data = change.doc.data();
+            // Check if it's a new submission (and not just an initial load)
+            // We can check the createdAt/submittedAt to see if it's recent
+            const isRecent =
+              data.submittedAt &&
+              Date.now() - data.submittedAt.toMillis() < 60000; // within last minute
+
+            if (data.paymentStatus === "submitted" && isRecent) {
+              try {
+                await addDoc(collection(db, COLLECTIONS.NOTIFICATIONS), {
+                  type: "payment_submitted",
+                  title: "New Payment Submitted",
+                  message: `${data.studentName} submitted ${data.month} fee via ${formatPaymentMethod(data.paymentMethod)}`,
+                  read: false,
+                  createdAt: serverTimestamp(),
+                  metadata: {
+                    paymentId: change.doc.id,
+                    studentId: data.studentId,
+                    amount: data.amount,
+                  },
+                });
+              } catch (error) {
+                console.error("Error creating notification:", error);
+              }
+            }
+          }
+        });
+
         const payments = snapshot.docs
           .map((doc) =>
             normalizeFeePaymentRecord(

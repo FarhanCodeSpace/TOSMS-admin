@@ -13,7 +13,6 @@ import {
 } from "recharts";
 import { formatMonthDisplay } from "@/utils/dateHelpers";
 import { formatPKR } from "@/utils/formatters";
-import SkeletonLoader from "@/components/ui/SkeletonLoader";
 
 type RevenueData = {
   month: string;
