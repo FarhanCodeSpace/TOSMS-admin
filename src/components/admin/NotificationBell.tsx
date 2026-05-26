@@ -1,71 +1,161 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import {
   Bell,
   CreditCard,
-  UserCheck,
-  CalendarCheck,
-  AlertTriangle,
+  Users,
+  GraduationCap,
 } from "lucide-react";
 import {
   collection,
   onSnapshot,
   query,
-  orderBy,
-  limit,
-  doc,
-  updateDoc,
-  writeBatch,
+  where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
-import { AdminNotification } from "@/lib/notifications";
 import { formatDistanceToNow } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
+interface NotificationItem {
+  id: string;
+  type: "driver-approval" | "fee-payment" | "student-unassigned";
+  title: string;
+  description: string;
+  severity: "critical" | "warning" | "info";
+  timestamp: Date;
+  actionLink: string;
+}
+
 export default function NotificationBell() {
-  const [notifications, setNotifications] = useState<AdminNotification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [drivers, setDrivers] = useState<NotificationItem[]>([]);
+  const [fees, setFees] = useState<NotificationItem[]>([]);
+  const [unassigned, setUnassigned] = useState<NotificationItem[]>([]);
+  const [readIds, setReadIds] = useState<string[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [shouldShake, setShouldShake] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
+  // Fetch pending drivers
   useEffect(() => {
     const q = query(
-      collection(db, COLLECTIONS.NOTIFICATIONS),
-      orderBy("createdAt", "desc"),
-      limit(50),
+      collection(db, COLLECTIONS.USERS),
+      where("role", "==", "driver"),
+      where("approved", "==", false),
     );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const notifs: AdminNotification[] = [];
-      let unread = 0;
-
-      snapshot.docs.forEach((doc) => {
-        const data = doc.data() as AdminNotification;
-        notifs.push({ ...data, id: doc.id });
-        if (!data.read) unread++;
-      });
-
-      // Trigger shake animation if new unread notification arrives
-      setUnreadCount((prev) => {
-        if (unread > prev) {
-          setShouldShake(true);
-          setTimeout(() => setShouldShake(false), 500);
-        }
-        return unread;
-      });
-
-      setNotifications(notifs);
-    });
-
-    return () => unsubscribe();
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const items: NotificationItem[] = [];
+        snapshot.docs.forEach((doc) => {
+          const data = doc.data();
+          if (data.profileComplete === true) {
+            items.push({
+              id: `driver-${doc.id}`,
+              type: "driver-approval",
+              title: "Driver Approval Pending",
+              description: `${data.fullName || "Unknown Driver"} (${data.email || ""}) is awaiting profile approval`,
+              severity: "critical",
+              timestamp: new Date(),
+              actionLink: "/dashboard/drivers",
+            });
+          }
+        });
+        setDrivers(items);
+      },
+      (error) => {
+        console.error("Error fetching pending drivers:", error);
+      }
+    );
+    return unsubscribe;
   }, []);
 
+  // Fetch pending fee payments
+  useEffect(() => {
+    const q = query(
+      collection(db, COLLECTIONS.FEE_PAYMENTS),
+      where("paymentStatus", "==", "submitted"),
+    );
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const items: NotificationItem[] = [];
+        snapshot.docs.forEach((doc) => {
+          const data = doc.data();
+          const submittedAt = data.submittedAt?.toDate() || new Date();
+          const amount = data.amount || 0;
+          items.push({
+            id: `fee-${doc.id}`,
+            type: "fee-payment",
+            title: "Fee Payment Awaiting Verification",
+            description: `${data.studentName || "Unknown Student"} submitted ${data.month || "Unknown Month"} fee (RS. ${amount.toFixed(2)}) for verification`,
+            severity: "warning",
+            timestamp: submittedAt,
+            actionLink: "/dashboard/fees?tab=pending",
+          });
+        });
+        setFees(items);
+      },
+      (error) => {
+        console.error("Error fetching pending fees:", error);
+      }
+    );
+    return unsubscribe;
+  }, []);
+
+  // Fetch unassigned students
+  useEffect(() => {
+    const q = query(
+      collection(db, COLLECTIONS.USERS),
+      where("role", "==", "student"),
+      where("assignedRouteId", "==", ""),
+    );
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const unassignedCount = snapshot.size;
+        if (unassignedCount > 0) {
+          setUnassigned([
+            {
+              id: "unassigned-students",
+              type: "student-unassigned",
+              title: "Students Awaiting Route Assignment",
+              description: `${unassignedCount} student${unassignedCount > 1 ? "s" : ""} ${unassignedCount > 1 ? "are" : "is"} not yet assigned to any route`,
+              severity: "info",
+              timestamp: new Date(),
+              actionLink: "/dashboard/students",
+            },
+          ]);
+        } else {
+          setUnassigned([]);
+        }
+      },
+      (error) => {
+        console.error("Error fetching unassigned students:", error);
+      }
+    );
+    return unsubscribe;
+  }, []);
+
+  // Load read notification IDs from local storage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("tosms_read_notifications");
+      if (stored) {
+        try {
+          setReadIds(JSON.parse(stored));
+        } catch (e) {
+          console.error("Error parsing read notifications:", e);
+        }
+      }
+    }
+  }, []);
+
+  // Click outside to close dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -79,54 +169,60 @@ export default function NotificationBell() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleNotificationClick = async (notif: AdminNotification) => {
-    if (!notif.read) {
-      await updateDoc(doc(db, COLLECTIONS.NOTIFICATIONS, notif.id), {
-        read: true,
-      });
-    }
+  // Combine and sort notifications
+  const notifications = useMemo(() => {
+    const merged = [...drivers, ...fees, ...unassigned];
+    return merged.sort((a, b) => {
+      const severityOrder = { critical: 0, warning: 1, info: 2 };
+      const severityDiff =
+        severityOrder[a.severity] - severityOrder[b.severity];
+      if (severityDiff !== 0) return severityDiff;
+      return b.timestamp.getTime() - a.timestamp.getTime();
+    });
+  }, [drivers, fees, unassigned]);
 
+  // Calculate unread count
+  const unreadCount = useMemo(() => {
+    return notifications.filter((n) => !readIds.includes(n.id)).length;
+  }, [notifications, readIds]);
+
+  // Shake animation trigger for new notifications
+  const prevUnreadCountRef = useRef(0);
+  useEffect(() => {
+    if (unreadCount > prevUnreadCountRef.current) {
+      setShouldShake(true);
+      const timer = setTimeout(() => setShouldShake(false), 500);
+      return () => clearTimeout(timer);
+    }
+    prevUnreadCountRef.current = unreadCount;
+  }, [unreadCount]);
+
+  const handleNotificationClick = (notif: NotificationItem) => {
+    if (!readIds.includes(notif.id)) {
+      const updated = [...readIds, notif.id];
+      setReadIds(updated);
+      localStorage.setItem("tosms_read_notifications", JSON.stringify(updated));
+    }
     setIsOpen(false);
-
-    switch (notif.type) {
-      case "payment_submitted":
-        router.push("/dashboard/fees");
-        break;
-      case "driver_pending":
-        router.push("/dashboard/drivers");
-        break;
-      case "new_booking":
-        // Assuming there might be a bookings page or relevant section
-        router.push("/dashboard/rides");
-        break;
-      case "availability_alert":
-        router.push("/dashboard/availability");
-        break;
-    }
+    router.push(notif.actionLink);
   };
 
-  const markAllRead = async () => {
-    const batch = writeBatch(db);
-    notifications
-      .filter((n) => !n.read)
-      .forEach((n) => {
-        batch.update(doc(db, COLLECTIONS.NOTIFICATIONS, n.id), { read: true });
-      });
-    await batch.commit();
+  const markAllRead = () => {
+    const allIds = notifications.map((n) => n.id);
+    setReadIds(allIds);
+    localStorage.setItem("tosms_read_notifications", JSON.stringify(allIds));
   };
 
-  const getIcon = (type: AdminNotification["type"]) => {
+  const getIcon = (type: NotificationItem["type"]) => {
     switch (type) {
-      case "payment_submitted":
+      case "fee-payment":
         return <CreditCard className="h-4 w-4 text-blue-500" />;
-      case "driver_pending":
-        return <UserCheck className="h-4 w-4 text-green-500" />;
-      case "new_booking":
-        return <CalendarCheck className="h-4 w-4 text-purple-500" />;
-      case "availability_alert":
-        return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+      case "driver-approval":
+        return <Users className="h-4 w-4 text-green-500" />;
+      case "student-unassigned":
+        return <GraduationCap className="h-4 w-4 text-purple-500" />;
       default:
-        return <Bell className="h-4 w-4" />;
+        return <Bell className="h-4 w-4 text-[var(--text-muted)]" />;
     }
   };
 
@@ -183,7 +279,7 @@ export default function NotificationBell() {
                     onClick={() => handleNotificationClick(notif)}
                     className={cn(
                       "flex gap-3 p-4 hover:bg-[var(--surface-secondary)] cursor-pointer border-b border-[var(--border)] transition-colors relative",
-                      !notif.read &&
+                      !readIds.includes(notif.id) &&
                         "bg-[var(--surface-secondary)]/30 border-l-4 border-l-orange-500",
                     )}
                   >
@@ -195,11 +291,11 @@ export default function NotificationBell() {
                         {notif.title}
                       </p>
                       <p className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">
-                        {notif.message}
+                        {notif.description}
                       </p>
                       <p className="text-[10px] text-[var(--text-muted)] mt-2 opacity-70">
-                        {notif.createdAt
-                          ? formatDistanceToNow(notif.createdAt.toDate(), {
+                        {notif.timestamp
+                          ? formatDistanceToNow(notif.timestamp, {
                               addSuffix: true,
                             })
                           : "Just now"}
