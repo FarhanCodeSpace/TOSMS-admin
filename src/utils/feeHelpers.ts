@@ -53,3 +53,10 @@ export function getRecentMonthKeys(count: number): string[] {
     return format(date, "yyyy-MM");
   });
 }
+
+export function isPaddlePayment(method?: string): boolean {
+  const value = String(method || "")
+    .toLowerCase()
+    .replace(/[\s-]/g, "_");
+  return value.includes("paddle") || value === "card";
+}

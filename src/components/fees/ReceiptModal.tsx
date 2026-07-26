@@ -7,13 +7,15 @@ import Image from "next/image";
 
 type ReceiptModalProps = {
   open: boolean;
-  receiptUrl: string;
+  receiptUrl?: string;
+  paddleTransactionId?: string;
   onClose: () => void;
 };
 
 export default function ReceiptModal({
   open,
   receiptUrl,
+  paddleTransactionId,
   onClose,
 }: ReceiptModalProps) {
   useEffect(() => {
@@ -54,15 +56,31 @@ export default function ReceiptModal({
           <X size={20} className="text-slate-900" />
         </button>
 
-        <div className="relative h-auto w-full bg-white rounded-xl overflow-hidden">
-          <Image
-            src={receiptUrl}
-            alt="Receipt"
-            width={800}
-            height={1000}
-            className="w-full h-auto object-contain"
-            priority
-          />
+        <div className="relative h-auto w-full bg-white rounded-xl overflow-hidden p-4">
+          {paddleTransactionId ? (
+            <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                Paddle Transaction
+              </p>
+              <p className="mt-1 font-mono text-sm text-emerald-900 break-all">
+                {paddleTransactionId}
+              </p>
+            </div>
+          ) : null}
+          {receiptUrl ? (
+            <Image
+              src={receiptUrl}
+              alt="Receipt"
+              width={800}
+              height={1000}
+              className="w-full h-auto object-contain"
+              priority
+            />
+          ) : !paddleTransactionId ? (
+            <p className="text-sm text-slate-500 text-center py-12">
+              No receipt available.
+            </p>
+          ) : null}
         </div>
       </div>
     </div>,

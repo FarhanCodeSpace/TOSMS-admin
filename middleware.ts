@@ -7,7 +7,8 @@ export function middleware(request: NextRequest) {
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
-    pathname.startsWith("/favicon.ico")
+    pathname.startsWith("/favicon.ico") ||
+    pathname.startsWith("/checkout")
   ) {
     return;
   }
@@ -24,5 +25,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!login|_next|api|favicon.ico).*)"],
+  matcher: ["/((?!login|checkout|_next|api|favicon.ico).*)"],
 };

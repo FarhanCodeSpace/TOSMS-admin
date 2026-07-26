@@ -37,6 +37,7 @@ export const formatPaymentMethod = (method: string): string => {
     bank_challan: "Bank Deposit",
     easypaisa: "EasyPaisa",
     jazzcash: "JazzCash",
+    paddle: "Card (Paddle)",
   };
   return map[method] || method;
 };

@@ -81,10 +81,13 @@ export interface FeePayment {
   routeId: string;
   month: string; // YYYY-MM format
   amount: number;
-  paymentMethod: "bank_challan" | "easypaisa" | "jazzcash";
+  amountUsdCents?: number;
+  pkrPerUsd?: number;
+  paymentMethod: "bank_challan" | "easypaisa" | "jazzcash" | "paddle";
   paymentStatus: "pending" | "submitted" | "verified";
   challanNumber?: string;
   transactionId?: string;
+  paddleTransactionId?: string;
   submittedAt: Timestamp;
   verifiedAt?: Timestamp;
   receiptImageUrl?: string;

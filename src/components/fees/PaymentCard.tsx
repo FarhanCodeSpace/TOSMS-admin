@@ -12,6 +12,7 @@ import {
   formatRelative,
   formatPaymentMethod,
 } from "@/utils/formatters";
+import { isPaddlePayment } from "@/utils/feeHelpers";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import Modal from "@/components/ui/Modal";
 import Image from "next/image";
@@ -32,7 +33,7 @@ export default function PaymentCard({
 
   const normalizeMethod = (
     method: unknown,
-  ): "bank_challan" | "easypaisa" | "jazzcash" | "other" => {
+  ): "bank_challan" | "easypaisa" | "jazzcash" | "paddle" | "other" => {
     const value = String(method || "")
       .toLowerCase()
       .replace(/[\s-]/g, "_");
@@ -45,6 +46,9 @@ export default function PaymentCard({
     }
     if (value.includes("jazz")) {
       return "jazzcash";
+    }
+    if (value.includes("paddle") || value === "card") {
+      return "paddle";
     }
 
     return "other";
@@ -76,7 +80,9 @@ export default function PaymentCard({
     "transactionID",
     "trxId",
     "txnId",
+    "paddleTransactionId",
   );
+  const isCardPaid = isPaddlePayment(String(paymentData.paymentMethod || ""));
 
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [rejectLoading, setRejectLoading] = useState(false);
@@ -151,6 +157,8 @@ export default function PaymentCard({
         return "💳";
       case "jazzcash":
         return "📱";
+      case "paddle":
+        return "💳";
       default:
         return "💰";
     }
@@ -208,11 +216,19 @@ export default function PaymentCard({
                 )}
               </div>
             ) : null}
-            {(paymentMethod === "easypaisa" || paymentMethod === "jazzcash") &&
+            {(paymentMethod === "easypaisa" ||
+              paymentMethod === "jazzcash" ||
+              paymentMethod === "paddle") &&
             transactionId ? (
               <p className="text-xs font-mono text-slate-600 mt-2">
-                TID: {transactionId}
+                {paymentMethod === "paddle" ? "Paddle: " : "TID: "}
+                {transactionId}
               </p>
+            ) : null}
+            {paymentMethod === "paddle" ? (
+              <span className="inline-flex mt-2 items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+                Paid by card
+              </span>
             ) : null}
             <p className="text-xs text-slate-500 mt-2">
               Submitted {formatRelative(payment.submittedAt)}
@@ -220,32 +236,41 @@ export default function PaymentCard({
           </div>
         </div>
 
-        {/* Right: Action Buttons */}
+        {/* Right: Action Buttons — Paddle payments are already verified */}
         <div className="flex flex-col gap-2 min-w-[140px] flex-shrink-0">
-          <button
-            onClick={() => setConfirmOpen(true)}
-            disabled={verifyLoading}
-            className="flex items-center justify-center gap-2 rounded-lg bg-green-500 hover:bg-green-600 text-white py-2 px-3 text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {verifyLoading ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
+          {isCardPaid || payment.paymentStatus === "verified" ? (
+            <div className="flex items-center justify-center gap-2 rounded-lg bg-emerald-50 text-emerald-700 py-2 px-3 text-sm font-semibold">
               <CheckCircle size={16} />
-            )}
-            Verify
-          </button>
-          <button
-            onClick={() => setRejectModalOpen(true)}
-            disabled={rejectLoading}
-            className="flex items-center justify-center gap-2 rounded-lg border border-red-300 hover:bg-red-50 text-red-600 hover:text-red-700 py-2 px-3 text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {rejectLoading ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <XCircle size={16} />
-            )}
-            Reject
-          </button>
+              Verified
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={() => setConfirmOpen(true)}
+                disabled={verifyLoading}
+                className="flex items-center justify-center gap-2 rounded-lg bg-green-500 hover:bg-green-600 text-white py-2 px-3 text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {verifyLoading ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <CheckCircle size={16} />
+                )}
+                Verify
+              </button>
+              <button
+                onClick={() => setRejectModalOpen(true)}
+                disabled={rejectLoading}
+                className="flex items-center justify-center gap-2 rounded-lg border border-red-300 hover:bg-red-50 text-red-600 hover:text-red-700 py-2 px-3 text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {rejectLoading ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <XCircle size={16} />
+                )}
+                Reject
+              </button>
+            </>
+          )}
         </div>
       </div>
 
