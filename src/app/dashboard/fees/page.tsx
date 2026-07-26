@@ -114,7 +114,7 @@ export default function FeesPage() {
     "all" | "verified" | "submitted" | "pending"
   >("all");
   const [methodFilter, setMethodFilter] = useState<
-    "all" | "bank_challan" | "easypaisa" | "jazzcash"
+    "all" | "bank_challan" | "easypaisa" | "jazzcash" | "paddle"
   >("all");
   const [routeFilter, setRouteFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("date");
@@ -793,7 +793,8 @@ export default function FeesPage() {
                           | "all"
                           | "bank_challan"
                           | "easypaisa"
-                          | "jazzcash",
+                          | "jazzcash"
+                          | "paddle",
                       );
                       setCurrentPage(1);
                     }}
@@ -801,6 +802,7 @@ export default function FeesPage() {
                   >
                     <option value="all">All Methods</option>
                     <option value="bank_challan">Bank Deposit</option>
+                    <option value="paddle">Card (Paddle)</option>
                     <option value="easypaisa">EasyPaisa</option>
                     <option value="jazzcash">JazzCash</option>
                   </select>
