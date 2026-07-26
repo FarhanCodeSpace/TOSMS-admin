@@ -7,4 +7,5 @@ nyarn.lock
 .env.local
 .DS_Store
 coverage
+.env
 n
