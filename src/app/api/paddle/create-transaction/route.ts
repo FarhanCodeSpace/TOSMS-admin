@@ -23,12 +23,23 @@ async function findOrCreateCustomer(
   name: string,
 ): Promise<string> {
   const paddle = getPaddle();
-  const page = await paddle.customers.list({ email: [email] }).next();
-  const first = page[0];
-  if (first?.id) return first.id;
-
-  const created = await paddle.customers.create({ email, name });
-  return created.id;
+  try {
+    const created = await paddle.customers.create({ email, name });
+    return created.id;
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "object" &&
+            error !== null &&
+            "detail" in error &&
+            typeof error.detail === "string"
+          ? error.detail
+          : "";
+    const match = message.match(/customer of id (ctm_[a-z0-9]+)/i);
+    if (match?.[1]) return match[1];
+    throw error;
+  }
 }
 
 /** Must be an approved Paddle checkout domain (not a LAN IP). */
@@ -42,6 +53,14 @@ function getCheckoutPageUrl(): string {
 }
 
 function paddleErrorMessage(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "forbidden"
+  ) {
+    return "Paddle API key is forbidden/revoked. Create a new sandbox API key and update PADDLE_API_KEY in .env.";
+  }
   if (
     typeof error === "object" &&
     error !== null &&
