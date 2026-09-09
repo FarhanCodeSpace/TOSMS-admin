@@ -6,7 +6,7 @@ import Modal from "./Modal";
 type ConfirmDialogProps = {
   open: boolean;
   title: string;
-  message: string;
+  message: React.ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   onConfirm: () => void;
@@ -29,7 +29,7 @@ export default function ConfirmDialog({
   return (
     <Modal open={open} onClose={onCancel} title={title} isLoading={isLoading}>
       <div className="space-y-5">
-        <p className="text-sm leading-6 text-slate-600">{message}</p>
+        <div className="text-sm leading-6 text-slate-600">{message}</div>
         <div className="flex justify-end gap-3">
           <button
             type="button"

@@ -14,6 +14,7 @@ export type StudentAvailabilityRowData = {
   userId: string;
   name: string;
   pickupStop?: string;
+  dropStop?: string;
   profileImageUrl?: string;
   status: StudentAvailabilityStatus;
   note?: string;
@@ -77,6 +78,9 @@ export default function StudentAvailabilityRow({
         </div>
       </td>
       <td className="px-3 py-3 text-slate-600">{student.pickupStop || "-"}</td>
+      <td className="px-3 py-3 text-slate-600">
+        {student.dropStop ? student.dropStop : <span className="text-slate-400">Not set</span>}
+      </td>
       <td className="px-3 py-3">
         <span
           className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusMeta.classes}`}

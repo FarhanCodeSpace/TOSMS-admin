@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import toast from "react-hot-toast";
 import Modal from "@/components/ui/Modal";
 import { User, Route } from "@/types";
-import { assignStudentToRoute } from "@/utils/firestoreHelpers";
+import { updateStudentRoutes } from "@/utils/firestoreHelpers";
 
 type AssignStudentToRouteModalProps = {
   open: boolean;
@@ -19,9 +19,37 @@ export default function AssignStudentToRouteModal({
   student,
   routes,
 }: AssignStudentToRouteModalProps) {
-  const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
-  const [selectedPickupStop, setSelectedPickupStop] = useState("");
+  const initialAssignedRouteIds = useMemo(() => {
+    return routes
+      .filter((r) => r.studentIds?.includes(student.uid))
+      .map((r) => r.routeId);
+  }, [routes, student.uid]);
+
+  const [selectedRouteIds, setSelectedRouteIds] = useState<string[]>([]);
+  const [selectedRouteStops, setSelectedRouteStops] = useState<Record<string, {pickupStop: string, dropStop: string}>>({});
   const [isLoading, setIsLoading] = useState(false);
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (open) {
+      setSelectedRouteIds(initialAssignedRouteIds);
+      
+      const initialStops: Record<string, {pickupStop: string, dropStop: string}> = {};
+      
+      if (student.routeStops && Object.keys(student.routeStops).length > 0) {
+         Object.assign(initialStops, student.routeStops);
+      } else if (initialAssignedRouteIds.length > 0) {
+         // Fallback for older data structure where only pickupStop existed
+         const primaryRouteId = initialAssignedRouteIds[0];
+         initialStops[primaryRouteId] = {
+            pickupStop: student.pickupStop || "",
+            dropStop: student.dropStop || ""
+         };
+      }
+      
+      setSelectedRouteStops(initialStops);
+    }
+  }, [open, initialAssignedRouteIds, student.routeStops, student.pickupStop, student.dropStop]);
 
   // Get active routes with available capacity
   const availableRoutes = useMemo(() => {
@@ -35,30 +63,46 @@ export default function AssignStudentToRouteModal({
       }));
   }, [routes]);
 
-  const handleAssign = async () => {
-    if (!selectedRoute || !selectedPickupStop) {
-      toast.error("Please select a route and pickup stop");
-      return;
-    }
+  const handleToggleRoute = (routeId: string) => {
+    setSelectedRouteIds((prev) =>
+      prev.includes(routeId)
+        ? prev.filter((id) => id !== routeId)
+        : [...prev, routeId]
+    );
+  };
 
+  const handleAssign = async () => {
     setIsLoading(true);
     try {
-      await assignStudentToRoute(
-        student.uid,
-        selectedRoute.routeId,
-        selectedPickupStop,
-        student.routeId,
+      const routesToAdd = selectedRouteIds.filter(
+        (id) => !initialAssignedRouteIds.includes(id)
+      );
+      const routesToRemove = initialAssignedRouteIds.filter(
+        (id) => !selectedRouteIds.includes(id)
       );
 
-      toast.success(
-        student.routeId
-          ? "Student reassigned successfully"
-          : "Student assigned successfully",
+      const primaryRouteId = selectedRouteIds.length > 0 ? selectedRouteIds[0] : "";
+
+      // Cleanup routeStops for unselected routes
+      const finalRouteStops: Record<string, {pickupStop: string, dropStop: string}> = {};
+      selectedRouteIds.forEach(id => {
+        finalRouteStops[id] = selectedRouteStops[id] || { pickupStop: "", dropStop: "" };
+      });
+
+      await updateStudentRoutes(
+        student.uid,
+        routesToAdd,
+        routesToRemove,
+        primaryRouteId,
+        finalRouteStops,
+        selectedRouteIds
       );
+
+      toast.success("Student routes updated successfully");
       onClose();
     } catch (error) {
-      console.error("Error assigning student:", error);
-      toast.error("Failed to assign student");
+      console.error("Error updating student routes:", error);
+      toast.error("Failed to update student routes");
     } finally {
       setIsLoading(false);
     }
@@ -68,73 +112,128 @@ export default function AssignStudentToRouteModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={
-        student.routeId
-          ? "Reassign Student to Route"
-          : "Assign Student to Route"
-      }
+      title="Manage Student Routes"
       isLoading={isLoading}
     >
-      <div className="space-y-6">
-        {/* Current Route Info */}
-        {student.routeId && (
+      <div className="flex flex-col">
+        <div className="space-y-6 pr-2 pb-4">
+          {/* Current Routes Info */}
+        {initialAssignedRouteIds.length > 0 && (
           <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-            <p className="text-sm text-blue-700">
-              <span className="font-semibold">Currently assigned to:</span>{" "}
-              {routes.find((r) => r.routeId === student.routeId)?.routeName ||
-                "Unknown"}
+            <p className="text-sm text-blue-700 font-semibold mb-2">
+              Currently assigned to:
             </p>
+            <ul className="list-disc pl-5 text-sm text-blue-800">
+              {initialAssignedRouteIds.map((routeId) => {
+                const route = routes.find((r) => r.routeId === routeId);
+                return <li key={routeId}>{route?.routeName || "Unknown"}</li>;
+              })}
+            </ul>
           </div>
         )}
 
-        {/* Route Selection */}
+        {/* Route Selection (Checkboxes) */}
         <div>
           <label className="block text-sm font-semibold text-slate-900 mb-2">
-            Select Route *
+            Select Routes
           </label>
-          <select
-            value={selectedRoute?.routeId || ""}
-            onChange={(e) => {
-              const route = availableRoutes.find(
-                (r) => r.routeId === e.target.value,
-              );
-              setSelectedRoute(route || null);
-              setSelectedPickupStop("");
-            }}
-            className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:border-blue-500"
-          >
-            <option value="">-- Choose a route --</option>
+          <div className="max-h-56 overflow-y-auto pr-2 border border-slate-200 rounded-lg p-2 space-y-2">
             {availableRoutes.map((route) => (
-              <option key={route.routeId} value={route.routeId}>
-                {route.routeName} ({route.studentIds?.length || 0}/30 students)
-              </option>
+              <label
+                key={route.routeId}
+                className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded cursor-pointer transition"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedRouteIds.includes(route.routeId)}
+                  onChange={() => handleToggleRoute(route.routeId)}
+                  className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                />
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium text-slate-900">
+                    {route.routeName}
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    {route.studentIds?.length || 0}/30 students
+                  </span>
+                </div>
+              </label>
             ))}
-          </select>
+            {availableRoutes.length === 0 && (
+              <div className="p-2 text-sm text-slate-500">
+                No active routes available.
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Pickup Stop Selection */}
-        {selectedRoute && (
-          <div>
-            <label className="block text-sm font-semibold text-slate-900 mb-2">
-              Select Pickup Stop *
+        {/* Pickup/Drop Stop Selection per Route */}
+        {selectedRouteIds.length > 0 && (
+          <div className="space-y-4">
+            <label className="block text-sm font-semibold text-slate-900">
+              Route Stops
             </label>
-            <select
-              value={selectedPickupStop}
-              onChange={(e) => setSelectedPickupStop(e.target.value)}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:border-blue-500"
-            >
-              <option value="">-- Choose a pickup stop --</option>
-              {selectedRoute.stops?.map((stop) => (
-                <option key={stop.order} value={stop.stopName}>
-                  {stop.order}. {stop.stopName}
-                </option>
-              ))}
-            </select>
+            {selectedRouteIds.map((routeId) => {
+              const route = routes.find((r) => r.routeId === routeId);
+              if (!route) return null;
+              
+              const stopsForRoute = route.stops?.slice().sort((a, b) => a.order - b.order) || [];
+              const currentStops = selectedRouteStops[routeId] || { pickupStop: "", dropStop: "" };
+
+              return (
+                <div key={routeId} className="p-4 border border-slate-200 rounded-lg bg-slate-50">
+                  <h4 className="font-medium text-slate-800 mb-3">{route.routeName}</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Pickup Stop
+                      </label>
+                      <select
+                        value={currentStops.pickupStop}
+                        onChange={(e) => setSelectedRouteStops(prev => ({
+                          ...prev,
+                          [routeId]: { ...prev[routeId], pickupStop: e.target.value, dropStop: prev[routeId]?.dropStop || "" }
+                        }))}
+                        className="w-full px-3 py-2 border border-slate-200 rounded outline-none focus:border-blue-500 text-sm"
+                      >
+                        <option value="">-- Choose pickup --</option>
+                        {stopsForRoute.map((stop, index) => (
+                          <option key={`pickup-${stop.stopName}-${index}`} value={stop.stopName}>
+                            {stop.stopName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Drop Stop
+                      </label>
+                      <select
+                        value={currentStops.dropStop}
+                        onChange={(e) => setSelectedRouteStops(prev => ({
+                          ...prev,
+                          [routeId]: { ...prev[routeId], dropStop: e.target.value, pickupStop: prev[routeId]?.pickupStop || "" }
+                        }))}
+                        className="w-full px-3 py-2 border border-slate-200 rounded outline-none focus:border-blue-500 text-sm"
+                      >
+                        <option value="">-- Choose drop --</option>
+                        {stopsForRoute.map((stop, index) => (
+                          <option key={`drop-${stop.stopName}-${index}`} value={stop.stopName}>
+                            {stop.stopName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
+        </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
+        <div className="flex justify-end gap-3 border-t border-slate-200 pt-4 mt-4">
           <button
             onClick={onClose}
             disabled={isLoading}
@@ -144,14 +243,10 @@ export default function AssignStudentToRouteModal({
           </button>
           <button
             onClick={handleAssign}
-            disabled={isLoading || !selectedRoute || !selectedPickupStop}
+            disabled={isLoading}
             className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isLoading
-              ? "Assigning..."
-              : student.routeId
-                ? "Reassign"
-                : "Assign"}
+            {isLoading ? "Saving..." : "Save Assignments"}
           </button>
         </div>
       </div>

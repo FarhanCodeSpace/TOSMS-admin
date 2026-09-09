@@ -21,6 +21,7 @@ interface Notification {
   id: string;
   type:
     | "driver-approval"
+    | "student-approval"
     | "fee-payment"
     | "student-unassigned"
     | "route-alert";
@@ -35,11 +36,12 @@ interface Notification {
   read: boolean;
 }
 
-interface PendingDriver {
+interface PendingUser {
   id: string;
   fullName?: string;
   email?: string;
   phone?: string;
+  role?: string;
   profileComplete?: boolean;
 }
 
@@ -57,48 +59,57 @@ export default function NotificationsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [filterType, setFilterType] = useState<string>("all");
 
-  // Fetch pending drivers
+  // Fetch pending users (drivers and students)
   useEffect(() => {
     const unsubscribe = onSnapshot(
       query(
         collection(db, COLLECTIONS.USERS),
-        where("role", "==", "driver"),
+        where("role", "in", ["driver", "student"]),
         where("approved", "==", false),
       ),
       (snapshot) => {
-        const pendingDrivers: PendingDriver[] = [];
+        const pendingUsers: PendingUser[] = [];
         snapshot.docs.forEach((doc) => {
           const data = doc.data();
-          if (data.profileComplete === true) {
-            pendingDrivers.push({
+          const isDriver = data.role === "driver";
+          const isStudent = data.role === "student";
+          
+          if (data.status === "rejected") return;
+
+          if ((isDriver && data.profileComplete === true) || isStudent) {
+            pendingUsers.push({
               id: doc.id,
-              fullName: data.fullName || "Unknown Driver",
+              fullName: data.fullName || (isDriver ? "Unknown Driver" : "Unknown Student"),
               email: data.email,
               phone: data.phone,
+              role: data.role,
               profileComplete: data.profileComplete,
             });
           }
         });
 
-        const driverNotifications: Notification[] = pendingDrivers.map(
-          (driver) => ({
-            id: `driver-${driver.id}`,
-            type: "driver-approval",
-            title: "Driver Approval Pending",
-            description: `${driver.fullName} (${driver.email}) is awaiting profile approval`,
-            icon: Users,
-            severity: "critical",
-            timestamp: new Date(),
-            actionLink: `/dashboard/drivers`,
-            actionLabel: "Review Driver",
-            metadata: { driverId: driver.id, driverName: driver.fullName },
-            read: false,
-          }),
+        const approvalNotifications: Notification[] = pendingUsers.map(
+          (user) => {
+            const isStudent = user.role === "student";
+            return {
+              id: `${user.role}-${user.id}`,
+              type: isStudent ? "student-approval" : "driver-approval",
+              title: isStudent ? "Student Approval Pending" : "Driver Approval Pending",
+              description: `${user.fullName} (${user.email}) is awaiting profile approval`,
+              icon: Users,
+              severity: "critical",
+              timestamp: new Date(),
+              actionLink: isStudent ? `/dashboard/students` : `/dashboard/drivers`,
+              actionLabel: isStudent ? "Review Student" : "Review Driver",
+              metadata: { userId: user.id, userName: user.fullName, role: user.role },
+              read: false,
+            };
+          }
         );
 
         setNotifications((prev) => {
-          const filtered = prev.filter((n) => n.type !== "driver-approval");
-          return [...filtered, ...driverNotifications];
+          const filtered = prev.filter((n) => n.type !== "driver-approval" && n.type !== "student-approval");
+          return [...filtered, ...approvalNotifications];
         });
       },
       (error) => {
@@ -281,6 +292,25 @@ export default function NotificationsPage() {
               <span className="ml-2 inline-block bg-white/20 px-2 py-0.5 rounded text-sm">
                 {
                   notifications.filter((n) => n.type === "driver-approval")
+                    .length
+                }
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setFilterType("student-approval")}
+            className={cn(
+              "px-4 py-2 rounded-lg font-medium transition-all duration-200",
+              filterType === "student-approval"
+                ? "bg-[var(--primary)] text-white"
+                : "bg-[var(--surface-variant)] text-[var(--text)] hover:bg-[var(--surface-variant)]/80",
+            )}
+          >
+            Student Approvals
+            {filterType === "student-approval" && (
+              <span className="ml-2 inline-block bg-white/20 px-2 py-0.5 rounded text-sm">
+                {
+                  notifications.filter((n) => n.type === "student-approval")
                     .length
                 }
               </span>

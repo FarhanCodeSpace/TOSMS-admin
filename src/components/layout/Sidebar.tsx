@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Bus,
   Calendar,
+  Clock,
   ChevronLeft,
   ChevronRight,
   CreditCard,
@@ -53,6 +54,11 @@ const navigationSections = [
   {
     label: "OTHER",
     items: [
+      {
+        label: "Early Ride Sharing",
+        href: "/dashboard/early-ride-sharing",
+        icon: Clock,
+      },
       { label: "Live Tracking", href: "/dashboard/tracking", icon: Map },
       { label: "Reviews", href: "/dashboard/reviews", icon: Star },
       { label: "Settings", href: "/dashboard/settings", icon: Settings },

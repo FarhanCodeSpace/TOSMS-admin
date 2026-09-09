@@ -6,8 +6,9 @@ import {
 } from "firebase/auth";
 import {
   getFirestore,
-  enableIndexedDbPersistence,
-  enableMultiTabIndexedDbPersistence,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
@@ -21,29 +22,38 @@ const firebaseConfig = {
 };
 
 // Prevent duplicate initialization
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const isNewApp = getApps().length === 0;
+const app = isNewApp ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+let dbInstance: any;
+
+if (typeof window !== "undefined") {
+  // Disable persistence in development to avoid IndexedDB corruption during Next.js Hot Reloads
+  if (isNewApp && process.env.NODE_ENV !== "development") {
+    try {
+      dbInstance = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      });
+    } catch (error: any) {
+      console.warn("Failed to initialize Firestore with persistence:", error);
+      dbInstance = getFirestore(app);
+    }
+  } else {
+    // In development or during HMR, just use memory cache to avoid lock errors
+    dbInstance = getFirestore(app);
+  }
+} else {
+  dbInstance = getFirestore(app);
+}
+
+export const db = dbInstance;
 export const storage = getStorage(app);
 
 if (typeof window !== "undefined") {
   setPersistence(auth, browserLocalPersistence).catch(console.error);
-
-  // Use a safer initialization for persistence
-  // enableMultiTabIndexedDbPersistence is preferred but can throw if already enabled
-  enableMultiTabIndexedDbPersistence(db).catch((err) => {
-    if (err.code === "failed-precondition") {
-      // This is expected if multiple tabs are open and multi-tab is not supported
-      // or if it's already enabled.
-      console.debug(
-        "Firestore persistence already enabled or precondition failed.",
-      );
-    } else if (err.code === "unimplemented") {
-      console.warn("Firestore persistence is not supported by this browser.");
-    } else {
-      console.error("Firestore persistence error:", err);
-    }
-  });
 }
 
 export default app;

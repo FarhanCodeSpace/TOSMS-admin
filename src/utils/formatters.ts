@@ -63,8 +63,19 @@ export const formatRole = (role: string): string => {
 };
 
 // Converts "HH:mm" to "h:mm AM/PM" while preserving already formatted values
-export function formatTimeTo12Hour(timeString: string): string {
-  if (!timeString) return "";
+export function formatTimeTo12Hour(
+  timeString: string | Timestamp | Date | null | undefined,
+): string {
+  if (timeString == null || timeString === "") return "";
+
+  if (timeString instanceof Timestamp) {
+    return format(timeString.toDate(), "h:mm a");
+  }
+  if (timeString instanceof Date) {
+    return format(timeString, "h:mm a");
+  }
+  if (typeof timeString !== "string") return "";
+
   if (timeString.includes("AM") || timeString.includes("PM")) return timeString;
 
   const [hourStr, minuteStr] = timeString.split(":");

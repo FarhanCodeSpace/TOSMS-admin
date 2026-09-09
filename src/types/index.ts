@@ -10,14 +10,32 @@ export interface User {
   fcmToken?: string;
   expoPushToken?: string;
   createdAt: Timestamp;
-  status: "active" | "suspended";
+  status: "active" | "suspended" | "pending" | "approved" | "rejected";
+  rejectionReason?: string;
+  rejectedAt?: Timestamp;
   routeId?: string;
+  assignedRouteIds?: string[];
   pickupStop?: string;
+  dropStop?: string;
+  routeStops?: {
+    [routeId: string]: {
+      pickupStop: string;
+      dropStop: string;
+    };
+  };
   // Driver specific fields
   vehicleType?: "van" | "bus" | "coaster";
   vehiclePlate?: string;
   vehicleCapacity?: number;
+  cnicNumber?: string;
   cnic?: string;
+  cnicFrontUrl?: string;
+  cnicBackUrl?: string;
+  university?: string;
+  universityName?: string;
+  instituteName?: string;
+  institute?: string;
+  college?: string;
   approved?: boolean;
   rating?: number;
   totalRides?: number;
@@ -40,10 +58,11 @@ export interface Route {
   stops: RouteStop[];
   assignedDriverId: string;
   assignedDriverName: string;
+  assignedDriverIds: string[];
   studentIds: string[];
-  departureTime: string;
-  returnTime: string;
-  feeAmount: number;
+  departureTime?: string | null;
+  returnTime?: string | null;
+  feeAmount?: number;
   isActive: boolean;
   createdAt: Timestamp;
 }
@@ -56,9 +75,35 @@ export interface Ride {
   driverName: string;
   date: string; // YYYY-MM-DD format — critical, must match mobile app
   departureTime: string;
-  status: "scheduled" | "active" | "completed" | "cancelled";
+  returnTime?: string;
+  status: "scheduled" | "active" | "completed" | "cancelled" | "auto_cancelled" | "delayed" | "no_show";
   boardedCount: number;
+  studentIds: string[];
+  completedStops?: (string | number)[];
   createdAt: Timestamp;
+}
+
+export interface EarlyRideStudentJoined {
+  studentId: string;
+  name: string;
+  gender: "male" | "female";
+  joinedAt: Timestamp;
+}
+
+export interface EarlyRideRequest {
+  requestId: string;
+  route: string;
+  university: string;
+  studentsJoined: EarlyRideStudentJoined[];
+  boysCount: number;
+  girlsCount: number;
+  status: "waiting" | "accepted" | "completed" | "cancelled" | "expired";
+  assignedDriverIds: string[];
+  acceptedDriverId: string | null;
+  vehicle: { name: string; plateNumber: string } | null;
+  rideId: string | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
 }
 
 export interface Availability {
@@ -143,4 +188,5 @@ export interface CompanySettings {
   easypaisaAccount: string;
   jazzcashAccount: string;
   feeDueDate: string;
+  monthlyFee?: number;
 }

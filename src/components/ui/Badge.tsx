@@ -82,7 +82,10 @@ export default function Badge({
           variant === "active" && hasPulse && "animate-pulse-dot",
         )}
       />
-      {children ?? status}
+      {children ??
+        (status
+          ? status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, " ")
+          : undefined)}
     </span>
   );
 }

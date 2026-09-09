@@ -1,6 +1,6 @@
 "use client";
 
-import { DragEvent, useState } from "react";
+import { DragEvent, useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { doc, updateDoc } from "firebase/firestore";
 import { Plus, Trash2, GripVertical, MapPin } from "lucide-react";
@@ -57,7 +57,6 @@ export default function EditRouteModal({
   const [description, setDescription] = useState(route.description || "");
   const [departureTime, setDepartureTime] = useState(route.departureTime);
   const [returnTime, setReturnTime] = useState(route.returnTime);
-  const [monthlyFee, setMonthlyFee] = useState(route.feeAmount.toString());
 
   // Stops
   const [stops, setStops] = useState<Stop[]>(
@@ -75,6 +74,34 @@ export default function EditRouteModal({
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerStopIndex, setPickerStopIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (open && route) {
+      setRouteName(route.routeName || "");
+      setDescription(route.description || "");
+      setDepartureTime(route.departureTime || "");
+      setReturnTime(route.returnTime || "");
+      setStops(
+        route.stops?.map((s) => ({
+          id: createStopId(
+            s.order,
+            s.coordinates.latitude.toString(),
+            s.coordinates.longitude.toString(),
+          ),
+          stopName: s.stopName,
+          order: s.order,
+          latitude: s.coordinates.latitude.toString(),
+          longitude: s.coordinates.longitude.toString(),
+        })) || []
+      );
+    } else if (!open) {
+      setRouteName("");
+      setDescription("");
+      setDepartureTime("");
+      setReturnTime("");
+      setStops([]);
+    }
+  }, [open, route]);
 
   const handleAddStop = () => {
     setStops([
@@ -145,8 +172,13 @@ export default function EditRouteModal({
 
   const handleSubmit = async () => {
     // Validate
-    if (!routeName.trim() || !departureTime || !returnTime || !monthlyFee) {
-      toast.error("Please fill in all required fields");
+    if (!routeName.trim()) {
+      toast.error("Please fill in all required fields (Route Name)");
+      return;
+    }
+
+    if (!departureTime && !returnTime) {
+      toast.error("At least one time (Departure or Return) must be set");
       return;
     }
 
@@ -168,7 +200,6 @@ export default function EditRouteModal({
         description,
         departureTime,
         returnTime,
-        feeAmount: parseInt(monthlyFee),
         stops: stops.map((s) => ({
           stopName: s.stopName,
           order: s.order,
@@ -226,38 +257,52 @@ export default function EditRouteModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-slate-900 mb-2">
-                Departure Time *
+                Departure Time
               </label>
-              <input
-                type="time"
-                value={departureTime}
-                onChange={(e) => setDepartureTime(e.target.value)}
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:border-blue-500"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="time"
+                  value={departureTime || ""}
+                  onChange={(e) => setDepartureTime(e.target.value)}
+                  className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:border-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setDepartureTime("")}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+                    departureTime === ""
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  None
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-900 mb-2">
-                Return Time *
+                Return Time
               </label>
-              <input
-                type="time"
-                value={returnTime}
-                onChange={(e) => setReturnTime(e.target.value)}
-                className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:border-blue-500"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="time"
+                  value={returnTime || ""}
+                  onChange={(e) => setReturnTime(e.target.value)}
+                  className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:border-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setReturnTime("")}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+                    returnTime === ""
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  None
+                </button>
+              </div>
             </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-900 mb-2">
-              Monthly Fee (PKR) *
-            </label>
-            <input
-              type="number"
-              value={monthlyFee}
-              onChange={(e) => setMonthlyFee(e.target.value)}
-              className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:border-blue-500"
-            />
           </div>
         </div>
 

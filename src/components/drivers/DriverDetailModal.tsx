@@ -2,18 +2,21 @@
 
 import Image from "next/image";
 import { User, Route } from "@/types";
-import { Calendar, MapPin, Pause, Play, Trash2 } from "lucide-react";
+import { Calendar, MapPin, Pause, Play, Trash2, CheckCircle, XCircle } from "lucide-react";
 import Modal from "@/components/ui/Modal";
 import Badge from "@/components/ui/Badge";
 import { formatTimeTo12Hour } from "@/utils/formatters";
+import { formatDisplayPhone } from "@/lib/utils";
 
 interface DriverDetailModalProps {
   open: boolean;
   driver: User;
   routes: Route[];
   onClose: () => void;
-  onSuspend: () => void;
-  onDelete: () => void;
+  onSuspend?: () => void;
+  onDelete?: () => void;
+  onApprove?: () => void;
+  onReject?: () => void;
 }
 
 function getInitials(name: string): string {
@@ -25,11 +28,11 @@ function getInitials(name: string): string {
     .slice(0, 2);
 }
 
-function getAssignedRoute(
+function getAssignedRoutes(
   driverId: string,
   routes: Route[],
-): Route | undefined {
-  return routes.find((r) => r.assignedDriverId === driverId);
+): Route[] {
+  return routes.filter((r) => r.assignedDriverId === driverId || (r.assignedDriverIds || []).includes(driverId));
 }
 
 function formatDate(date: any): string {
@@ -51,9 +54,14 @@ export default function DriverDetailModal({
   onClose,
   onSuspend,
   onDelete,
+  onApprove,
+  onReject,
 }: DriverDetailModalProps) {
-  const assignedRoute = getAssignedRoute(driver.uid, routes);
-  const isActive = driver.status === "active";
+  const assignedRoutes = getAssignedRoutes(driver.uid, routes);
+  const effectiveStatus = driver.status || ((driver as any).approved ? "active" : "pending");
+  const isPending = effectiveStatus === "pending";
+  const isSuspended = effectiveStatus === "suspended";
+  const isApproved = effectiveStatus === "approved" || effectiveStatus === "active";
 
   return (
     <Modal
@@ -61,40 +69,62 @@ export default function DriverDetailModal({
       onClose={onClose}
       title="Driver Details"
       footer={
-        <div className="flex gap-2">
+        <div className="flex gap-2 w-full">
           <button
             onClick={onDelete}
             className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 inline-flex items-center gap-2"
           >
             <Trash2 className="h-4 w-4" />
-            Delete Driver
+            Delete
           </button>
+          
+          <div className="flex-1" />
+
           <button
             onClick={onClose}
             className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
           >
             Close
           </button>
-          <button
-            onClick={onSuspend}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition flex items-center gap-2 ${
-              isActive
-                ? "bg-amber-600 hover:bg-amber-700"
-                : "bg-emerald-600 hover:bg-emerald-700"
-            }`}
-          >
-            {isActive ? (
-              <>
-                <Pause className="h-4 w-4" />
-                Suspend Driver
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4" />
-                Reactivate Driver
-              </>
-            )}
-          </button>
+          
+          {isPending && onApprove && onReject && (
+            <>
+              <button
+                onClick={onReject}
+                className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 flex items-center gap-2 transition"
+              >
+                <XCircle className="h-4 w-4" />
+                Reject
+              </button>
+              <button
+                onClick={onApprove}
+                className="rounded-lg bg-emerald-600 hover:bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition flex items-center gap-2"
+              >
+                <CheckCircle className="h-4 w-4" />
+                Approve Driver
+              </button>
+            </>
+          )}
+
+          {isSuspended && (
+            <button
+              onClick={onSuspend}
+              className="rounded-lg bg-emerald-600 hover:bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition flex items-center gap-2"
+            >
+              <Play className="h-4 w-4" />
+              Reactivate Driver
+            </button>
+          )}
+
+          {isApproved && (
+            <button
+              onClick={onSuspend}
+              className="rounded-lg bg-amber-600 hover:bg-amber-700 px-4 py-2 text-sm font-semibold text-white transition flex items-center gap-2"
+            >
+              <Pause className="h-4 w-4" />
+              Suspend Driver
+            </button>
+          )}
         </div>
       }
     >
@@ -121,9 +151,9 @@ export default function DriverDetailModal({
               {driver.fullName}
             </h3>
             <p className="text-slate-600">{driver.email}</p>
-            <p className="text-slate-600">{driver.phone}</p>
+            <p className="text-slate-600">{formatDisplayPhone(driver.phone || (driver as any).phoneNumber)}</p>
             <div className="mt-2">
-              <Badge status={driver.status} />
+              <Badge status={driver.status === "approved" ? "active" : driver.status} />
             </div>
           </div>
         </div>
@@ -134,6 +164,53 @@ export default function DriverDetailModal({
           <p className="text-sm text-slate-900 mt-1">
             {formatDate(driver.createdAt)}
           </p>
+        </div>
+
+        {/* Identity Documents */}
+        <div className="rounded-lg bg-slate-50 p-4 border border-slate-200">
+          <h4 className="font-semibold text-slate-900 mb-3">
+            Identity Documents
+          </h4>
+          {(!driver.cnic && !driver.cnicNumber && !driver.cnicFrontUrl && !driver.cnicBackUrl) ? (
+            <p className="text-slate-500 text-sm text-center py-2">No CNIC documents uploaded</p>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs font-medium text-slate-600">CNIC Number</p>
+                <p className="text-sm font-semibold text-slate-900 mt-1">
+                  {driver.cnic || driver.cnicNumber || "N/A"}
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-4">
+                {driver.cnicFrontUrl && (
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 mb-2">Front</p>
+                    <Image
+                      src={driver.cnicFrontUrl}
+                      alt="CNIC Front"
+                      width={192}
+                      height={128}
+                      unoptimized
+                      className="h-32 w-48 object-cover rounded-md border border-gray-200 bg-white"
+                    />
+                  </div>
+                )}
+                {driver.cnicBackUrl && (
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 mb-2">Back</p>
+                    <Image
+                      src={driver.cnicBackUrl}
+                      alt="CNIC Back"
+                      width={192}
+                      height={128}
+                      unoptimized
+                      className="h-32 w-48 object-cover rounded-md border border-gray-200 bg-white"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Vehicle Info Card */}
@@ -172,65 +249,72 @@ export default function DriverDetailModal({
           </div>
         </div>
 
-        {/* Assigned Route Card */}
-        {assignedRoute && (
-          <div className="rounded-lg bg-blue-50 p-4 border border-blue-200">
-            <h4 className="font-semibold text-slate-900 mb-3">
-              Assigned Route
+        {/* Assigned Route Cards */}
+        {!isPending && assignedRoutes.length > 0 && (
+          <div className="space-y-3">
+            <h4 className="font-semibold text-slate-900 mb-1">
+              Assigned Routes ({assignedRoutes.length})
             </h4>
-            <div className="space-y-2">
-              <div className="flex items-start gap-2">
-                <MapPin className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-slate-900">
-                    {assignedRoute.routeName}
-                  </p>
+            {assignedRoutes.map((route) => (
+              <div key={route.routeId} className="rounded-lg bg-blue-50 p-4 border border-blue-200">
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2">
+                    <MapPin className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">
+                        {route.routeName}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Calendar className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-slate-600">
+                        {route.departureTime && `Departure: ${formatTimeTo12Hour(route.departureTime)}`}
+                        {route.departureTime && route.returnTime && " | "}
+                        {route.returnTime && `Return: ${formatTimeTo12Hour(route.returnTime)}`}
+                      </p>
+                    </div>
+                  </div>
+                  <a
+                    href={`/dashboard/routes?routeId=${route.routeId}`}
+                    className="text-sm text-blue-600 hover:text-blue-700 font-medium inline-block mt-2"
+                  >
+                    View Route →
+                  </a>
                 </div>
               </div>
-              <div className="flex items-start gap-2">
-                <Calendar className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-slate-600">
-                    Departure: {formatTimeTo12Hour(assignedRoute.departureTime)}{" "}
-                    | Return: {formatTimeTo12Hour(assignedRoute.returnTime)}
-                  </p>
-                </div>
-              </div>
-              <a
-                href={`/dashboard/routes?routeId=${assignedRoute.routeId}`}
-                className="text-sm text-blue-600 hover:text-blue-700 font-medium inline-block mt-2"
-              >
-                View Route →
-              </a>
-            </div>
+            ))}
           </div>
         )}
 
         {/* Performance Card */}
-        <div className="rounded-lg bg-emerald-50 p-4 border border-emerald-200">
-          <h4 className="font-semibold text-slate-900 mb-3">Performance</h4>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="flex items-center gap-1">
-                <span className="text-lg">
-                  {Array(Math.round(driver.rating || 0))
-                    .fill(0)
-                    .map(() => "⭐")
-                    .join("")}
-                </span>
+        {!isPending && (
+          <div className="rounded-lg bg-emerald-50 p-4 border border-emerald-200">
+            <h4 className="font-semibold text-slate-900 mb-3">Performance</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="flex items-center gap-1">
+                  <span className="text-lg">
+                    {Array(Math.round(driver.rating || 0))
+                      .fill(0)
+                      .map(() => "⭐")
+                      .join("")}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 mt-1">
+                  Rating: {driver.rating?.toFixed(1) || "0.0"}/5
+                </p>
               </div>
-              <p className="text-xs text-slate-600 mt-1">
-                Rating: {driver.rating?.toFixed(1) || "0.0"}/5
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-900">
-                {driver.totalRides || 0}
-              </p>
-              <p className="text-xs text-slate-600">Total Rides Completed</p>
+              <div>
+                <p className="text-sm font-semibold text-slate-900">
+                  {driver.totalRides || 0}
+                </p>
+                <p className="text-xs text-slate-600">Total Rides Completed</p>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </Modal>
   );

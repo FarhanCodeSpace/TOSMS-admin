@@ -27,7 +27,7 @@ type RouteAvailabilityCardProps = {
   totalStudents: number;
   expanded: boolean;
   onToggleExpanded: () => void;
-  driver: DriverDetails;
+  drivers: DriverDetails[];
   students: StudentAvailabilityRowData[];
   studentCounts: {
     available: number;
@@ -71,7 +71,7 @@ export default function RouteAvailabilityCard({
   totalStudents,
   expanded,
   onToggleExpanded,
-  driver,
+  drivers,
   students,
   studentCounts,
   sortAscending,
@@ -83,15 +83,13 @@ export default function RouteAvailabilityCard({
   studentLoading,
   lastUpdated,
 }: RouteAvailabilityCardProps) {
-  const driverStatusMeta = getDriverStatusMeta(driver.status);
-
   return (
     <article className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-5 py-4 bg-white">
         <div>
           <h2 className="text-lg font-bold text-slate-900">{routeName}</h2>
           <p className="text-sm text-slate-600">
-            {formatTimeTo12Hour(departureTime)} departure • {totalStudents}{" "}
+            {departureTime ? `${formatTimeTo12Hour(departureTime)} departure • ` : ""}{totalStudents}{" "}
             students
           </p>
         </div>
@@ -134,53 +132,68 @@ export default function RouteAvailabilityCard({
               <div className="h-8 w-24 bg-slate-200 rounded-full" />
             </div>
           ) : (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                {driver.profileImageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={driver.profileImageUrl}
-                    alt={driver.name}
-                    className="h-10 w-10 rounded-full border border-slate-200 object-cover"
-                  />
-                ) : (
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 text-sm font-semibold text-sky-700">
-                    {getInitials(driver.name)}
-                  </div>
-                )}
-                <div>
-                  <p className="font-semibold text-slate-900">{driver.name}</p>
-                  <p className="text-sm text-slate-600">
-                    {driver.phone || "No phone"}
-                  </p>
-                </div>
-              </div>
+            <div className="flex flex-col gap-4">
+              {drivers.length > 0 ? drivers.map((driver, idx) => {
+                const driverStatusMeta = getDriverStatusMeta(driver.status);
+                return (
+                  <div key={idx} className="flex flex-col gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        {driver.profileImageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={driver.profileImageUrl}
+                            alt={driver.name}
+                            className="h-10 w-10 rounded-full border border-slate-200 object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 text-sm font-semibold text-sky-700">
+                            {getInitials(driver.name)}
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-semibold text-slate-900">{driver.name}</p>
+                          <p className="text-sm text-slate-600">
+                            {driver.phone || "No phone"}
+                          </p>
+                        </div>
+                      </div>
 
-              <span
-                className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${driverStatusMeta.classes}`}
-              >
-                {driverStatusMeta.label}
-              </span>
+                      <span
+                        className={`inline-flex rounded-full px-4 py-2 text-sm font-semibold ${driverStatusMeta.classes}`}
+                      >
+                        {driverStatusMeta.label}
+                      </span>
+                    </div>
+
+                    {driver.status === "not_available" && !driverLoading ? (
+                      <>
+                        {driver.note ? (
+                          <p className="mt-3 text-sm text-rose-700">
+                            Driver note: {driver.note}
+                          </p>
+                        ) : null}
+                        {driver.vehicleAvailable === false ? (
+                          <p className="mt-1 text-sm font-medium text-rose-700">
+                            Vehicle unavailable
+                          </p>
+                        ) : null}
+                        <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
+                          Backup driver required
+                        </div>
+                      </>
+                    ) : null}
+
+                    {idx < drivers.length - 1 && (
+                      <hr className="border-slate-200" />
+                    )}
+                  </div>
+                );
+              }) : (
+                <div className="text-sm text-slate-500">Unassigned Driver</div>
+              )}
             </div>
           )}
-
-          {driver.status === "not_available" && !driverLoading ? (
-            <>
-              {driver.note ? (
-                <p className="mt-3 text-sm text-rose-700">
-                  Driver note: {driver.note}
-                </p>
-              ) : null}
-              {driver.vehicleAvailable === false ? (
-                <p className="mt-1 text-sm font-medium text-rose-700">
-                  Vehicle unavailable
-                </p>
-              ) : null}
-              <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
-                Backup driver required
-              </div>
-            </>
-          ) : null}
         </div>
 
         {studentLoading ? (
@@ -229,6 +242,9 @@ export default function RouteAvailabilityCard({
                       </th>
                       <th className="px-3 py-2 text-left font-semibold">
                         Pickup Stop
+                      </th>
+                      <th className="px-3 py-2 text-left font-semibold">
+                        Drop Stop
                       </th>
                       <th className="px-3 py-2 text-left font-semibold">
                         Status

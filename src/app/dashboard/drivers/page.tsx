@@ -12,21 +12,25 @@ import {
   writeBatch,
   serverTimestamp,
 } from "firebase/firestore";
-import { Users, AlertCircle, Search, Loader2 } from "lucide-react";
+import { Users, AlertCircle, Search, Loader2, GitBranch } from "lucide-react";
 import { Download } from "lucide-react";
 import toast from "react-hot-toast";
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
-import type { User, Route } from "@/types";
+import type { User, Route, Review } from "@/types";
+import { isSameDay } from "date-fns";
 import { useAuth } from "@/context/AuthContext";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import Modal from "@/components/ui/Modal";
 import SkeletonLoader from "@/components/ui/SkeletonLoader";
+import StatsCard from "@/components/ui/StatsCard";
 import DriverCard from "@/components/drivers/DriverCard";
 import DriverTable from "@/components/drivers/DriverTable";
 import DriverDetailModal from "@/components/drivers/DriverDetailModal";
-import AssignDriverModal from "@/components/routes/AssignDriverModal";
-import { deleteDriverAccount } from "@/utils/firestoreHelpers";
+import AssignDriverRoutesModal from "@/components/drivers/AssignDriverRoutesModal";
+import CNICReviewModal from "@/components/ui/CNICReviewModal";
+import { deleteDriverAccount, resolvePendingRegistrationNotification } from "@/utils/firestoreHelpers";
+import { getRouteAssignedDriverIds } from "@/utils/routeAssignments";
 
 type TabType = "all" | "pending" | "approved" | "suspended";
 
@@ -37,6 +41,7 @@ export default function DriversPage() {
   const [pendingDrivers, setPendingDrivers] = useState<User[]>([]);
   const [suspendedDrivers, setSuspendedDrivers] = useState<User[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [vehicleFilter, setVehicleFilter] = useState<
@@ -45,12 +50,8 @@ export default function DriversPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedDriver, setSelectedDriver] = useState<User | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
-  const [routePickerOpen, setRoutePickerOpen] = useState(false);
-  const [driverForRouteAssign, setDriverForRouteAssign] = useState<User | null>(
-    null,
-  );
-  const [selectedRouteId, setSelectedRouteId] = useState("");
-  const [assignModalRoute, setAssignModalRoute] = useState<Route | null>(null);
+  const [assignRoutesModalOpen, setAssignRoutesModalOpen] = useState(false);
+  const [driverForRouteAssign, setDriverForRouteAssign] = useState<User | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
@@ -69,6 +70,9 @@ export default function DriversPage() {
     open: false,
     url: "",
   });
+  const [cnicModalOpen, setCnicModalOpen] = useState(false);
+  const [userForCnicReview, setUserForCnicReview] = useState<User | null>(null);
+  const [assignmentFilter, setAssignmentFilter] = useState<'all' | 'assigned' | 'unassigned'>('all');
 
   const itemsPerPage = 15;
   const hasAutoSwitchedTab = useRef(false);
@@ -89,6 +93,48 @@ export default function DriversPage() {
     return () => unsubscribe();
   }, [currentUser]);
 
+  // TEMPORARY CLEANUP SCRIPT (Runs once to clean orphaned students from routes)
+  useEffect(() => {
+    if (routes.length === 0) return;
+    const runCleanup = async () => {
+      let cleaned = false;
+      const { getDocs, query, collection, where, doc, updateDoc } = await import("firebase/firestore");
+      const usersSnap = await getDocs(query(collection(db, "users"), where("role", "==", "student")));
+      const validStudentIds = new Set(usersSnap.docs.map(d => d.id));
+      
+      for (const route of routes) {
+        if (!route.studentIds) continue;
+        const validIds = route.studentIds.filter((id) => validStudentIds.has(id));
+        if (validIds.length !== route.studentIds.length) {
+          console.log(`Cleaning up route ${route.routeName}: removing ${route.studentIds.length - validIds.length} orphaned students`);
+          try {
+            await updateDoc(doc(db, "routes", route.routeId), {
+              studentIds: validIds
+            });
+            cleaned = true;
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+      if (cleaned) console.log("Database cleanup complete!");
+    };
+    runCleanup();
+  }, [routes]);
+
+  // Fetch reviews for daily aggregates
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubscribe = onSnapshot(
+      collection(db, COLLECTIONS.REVIEWS),
+      (snapshot) => {
+        const reviewsData = snapshot.docs.map((doc) => doc.data() as Review);
+        setReviews(reviewsData);
+      }
+    );
+    return () => unsubscribe();
+  }, [currentUser]);
+
   // Fetch all drivers
   useEffect(() => {
     if (!currentUser) return;
@@ -103,7 +149,8 @@ export default function DriversPage() {
         const pending = drivers.filter(
           (d) =>
             (d.approved === false || d.approved === undefined) &&
-            d.profileComplete === true,
+            d.profileComplete === true &&
+            d.status !== "rejected",
         );
         const suspended = drivers.filter((d) => d.status === "suspended");
 
@@ -151,12 +198,30 @@ export default function DriversPage() {
         (d) =>
           (d.fullName?.toLowerCase().includes(term) ?? false) ||
           (d.email?.toLowerCase().includes(term) ?? false) ||
-          (d.vehiclePlate?.toLowerCase().includes(term) ?? false),
+          (d.vehiclePlate?.toLowerCase().includes(term) ?? false) ||
+          (d.cnicNumber?.toLowerCase().includes(term) ?? false) ||
+          (d.cnic?.toLowerCase().includes(term) ?? false),
       );
     }
 
     if (vehicleFilter !== "all") {
       filtered = filtered.filter((d) => d.vehicleType === vehicleFilter);
+    }
+
+    if (activeTab === "approved") {
+      if (assignmentFilter === "assigned") {
+        filtered = filtered.filter((d) => {
+          const hasRouteIdStr = typeof d.routeId === 'string' && d.routeId.trim() !== '';
+          const hasRouteIdArr = Array.isArray(d.routeId) && d.routeId.length > 0;
+          return hasRouteIdStr || hasRouteIdArr;
+        });
+      } else if (assignmentFilter === "unassigned") {
+        filtered = filtered.filter((d) => {
+          const hasRouteIdStr = typeof d.routeId === 'string' && d.routeId.trim() !== '';
+          const hasRouteIdArr = Array.isArray(d.routeId) && d.routeId.length > 0;
+          return !(hasRouteIdStr || hasRouteIdArr);
+        });
+      }
     }
 
     return filtered;
@@ -167,6 +232,7 @@ export default function DriversPage() {
     activeTab,
     searchTerm,
     vehicleFilter,
+    assignmentFilter,
   ]);
 
   const paginatedDrivers = useMemo(() => {
@@ -175,6 +241,50 @@ export default function DriversPage() {
   }, [filteredDrivers, currentPage]);
 
   const totalPages = Math.ceil(filteredDrivers.length / itemsPerPage);
+
+  // Calculate stats
+  const stats = useMemo(() => {
+    // FIX: Exact same condition used by the Approved tab
+    const approvedFleet = allDrivers.filter(
+      (d) => d.approved === true && d.status !== "suspended"
+    );
+
+    const total = approvedFleet.length;
+    let assigned = 0;
+    
+    approvedFleet.forEach((d) => {
+      const hasRouteIdStr = typeof d.routeId === 'string' && d.routeId.trim() !== '';
+      const hasRouteIdArr = Array.isArray(d.routeId) && d.routeId.length > 0;
+      if (hasRouteIdStr || hasRouteIdArr) {
+        assigned++;
+      }
+    });
+
+    const unassigned = total - assigned;
+    return { total, assigned, unassigned };
+  }, [allDrivers]);
+
+  const dailyAverages = useMemo(() => {
+    const targetDate = new Date();
+    const averages: Record<string, number> = {};
+
+    allDrivers.forEach(driver => {
+      const driverReviews = reviews.filter(r => r.driverId === driver.uid);
+      const applicableReviews = driverReviews.filter(r => {
+        if (!r.createdAt || !(r.createdAt as any).toDate) return false;
+        return isSameDay((r.createdAt as any).toDate(), targetDate);
+      });
+
+      const totalReviews = applicableReviews.length;
+      if (totalReviews > 0) {
+        averages[driver.uid] = applicableReviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews;
+      } else {
+        averages[driver.uid] = 0.0;
+      }
+    });
+
+    return averages;
+  }, [allDrivers, reviews]);
 
   // Handle approve driver
   const handleApproveDriver = async (driver: User) => {
@@ -191,8 +301,11 @@ export default function DriversPage() {
       });
 
       await batch.commit();
+      await resolvePendingRegistrationNotification(driver.uid);
       toast.success("Driver approved! They can now access the app.");
       setConfirmDialog({ open: false, type: null, driver: null });
+      setCnicModalOpen(false);
+      setUserForCnicReview(null);
     } catch (error) {
       console.error("Error approving driver:", error);
       toast.error("Failed to approve driver. Please try again.");
@@ -205,11 +318,16 @@ export default function DriversPage() {
   const handleRejectDriver = async (driver: User, reason: string) => {
     try {
       setActionLoading(true);
+      const rejectionReason = reason.trim() || "Your registration was not approved by the administration.";
       await updateDoc(doc(db, COLLECTIONS.USERS, driver.uid), {
-        status: "suspended",
-        approved: false,
+        status: "rejected",
+        rejectionReason: rejectionReason,
+        rejectedAt: serverTimestamp(),
       });
-      toast.success(`Driver rejected. Reason: ${reason}`);
+      setAllDrivers((prev) => prev.filter((d) => d.uid !== driver.uid));
+      setPendingDrivers((prev) => prev.filter((d) => d.uid !== driver.uid));
+      await resolvePendingRegistrationNotification(driver.uid);
+      toast.success(`Driver rejected. Reason: ${rejectionReason}`);
       setConfirmDialog({ open: false, type: null, driver: null });
     } catch (error) {
       console.error("Error rejecting driver:", error);
@@ -262,17 +380,19 @@ export default function DriversPage() {
       return `"${safe}"`;
     };
 
-    const routeNameByDriverId = new Map<string, string>();
+    const routeNameByDriverId = new Map<string, string[]>();
     routes.forEach((route) => {
-      if (route.assignedDriverId) {
-        routeNameByDriverId.set(route.assignedDriverId, route.routeName);
-      }
+      getRouteAssignedDriverIds(route).forEach((driverId) => {
+        const current = routeNameByDriverId.get(driverId) || [];
+        routeNameByDriverId.set(driverId, [...current, route.routeName]);
+      });
     });
 
     const headers = [
       "Name",
       "Email",
       "Phone",
+      "CNIC",
       "Vehicle Type",
       "Vehicle Plate",
       "Vehicle Capacity",
@@ -284,11 +404,12 @@ export default function DriversPage() {
       normalizeCsvText(driver.fullName),
       normalizeCsvText(driver.email),
       forceExcelText(driver.phone),
+      forceExcelText(driver.cnicNumber || driver.cnic || "-"),
       normalizeCsvText(driver.vehicleType),
       normalizeCsvText(driver.vehiclePlate),
       forceExcelText(driver.vehicleCapacity),
       normalizeCsvText(driver.status),
-      normalizeCsvText(routeNameByDriverId.get(driver.uid) || "Unassigned"),
+      normalizeCsvText((routeNameByDriverId.get(driver.uid) || []).join(", ") || "Unassigned"),
     ]);
 
     const csv = [
@@ -325,7 +446,10 @@ export default function DriversPage() {
     try {
       setActionLoading(true);
       await deleteDriverAccount(driver.uid);
+      await resolvePendingRegistrationNotification(driver.uid);
       toast.success("Driver deleted successfully");
+      setAllDrivers((prev) => prev.filter((d) => d.uid !== driver.uid));
+      setPendingDrivers((prev) => prev.filter((d) => d.uid !== driver.uid));
       setConfirmDialog({ open: false, type: null, driver: null });
       setDetailModalOpen(false);
       setSelectedDriver(null);
@@ -340,29 +464,12 @@ export default function DriversPage() {
   const handleAssignRouteClick = (driver: User) => {
     setDriverForRouteAssign(driver);
 
-    const currentRoute =
-      routes.find((r) => r.assignedDriverId === driver.uid) ||
-      (driver.routeId
-        ? routes.find((r) => r.routeId === driver.routeId)
-        : null);
-
     if (routes.length === 0) {
       toast.error("No routes available for assignment");
       return;
     }
 
-    setSelectedRouteId(currentRoute?.routeId || routes[0].routeId);
-    setRoutePickerOpen(true);
-  };
-
-  const handleOpenAssignModalFromPicker = () => {
-    const selectedRoute = routes.find((r) => r.routeId === selectedRouteId);
-    if (!selectedRoute) {
-      toast.error("Please select a route first");
-      return;
-    }
-    setRoutePickerOpen(false);
-    setAssignModalRoute(selectedRoute);
+    setAssignRoutesModalOpen(true);
   };
 
   const renderTabContent = () => {
@@ -410,6 +517,7 @@ export default function DriversPage() {
                   <DriverCard
                     key={driver.uid}
                     driver={driver}
+                    routes={routes}
                     onApprove={() => {
                       setConfirmDialog({
                         open: true,
@@ -424,6 +532,7 @@ export default function DriversPage() {
                         driver,
                       });
                     }}
+                    onVerifyCNIC={() => handleViewDriver(driver)}
                     onDelete={() => {
                       setConfirmDialog({
                         open: true,
@@ -448,7 +557,7 @@ export default function DriversPage() {
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
-                    placeholder="Search by name, email, or plate..."
+                    placeholder="Search by name, email, plate, or CNIC..."
                     value={searchTerm}
                     onChange={(e) => {
                       setSearchTerm(e.target.value);
@@ -475,6 +584,31 @@ export default function DriversPage() {
               </select>
             </div>
 
+            <div className="flex gap-2">
+              {(
+                [
+                  { value: "all", label: "All" },
+                  { value: "assigned", label: "Assigned" },
+                  { value: "unassigned", label: "Unassigned" },
+                ] as const
+              ).map((filter) => (
+                <button
+                  key={filter.value}
+                  onClick={() => {
+                    setAssignmentFilter(filter.value);
+                    setCurrentPage(1);
+                  }}
+                  className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
+                    assignmentFilter === filter.value
+                      ? "bg-slate-800 text-white"
+                      : "bg-slate-100 text-slate-600 hover:opacity-90"
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+
             {filteredDrivers.length === 0 ? (
               <div className="py-12 text-center">
                 <Users className="h-12 w-12 text-slate-300 mx-auto mb-3" />
@@ -485,6 +619,7 @@ export default function DriversPage() {
                 <DriverTable
                   drivers={paginatedDrivers}
                   routes={routes}
+                  dailyAverages={dailyAverages}
                   onViewDriver={handleViewDriver}
                   onAssignRoute={handleAssignRouteClick}
                   onSuspend={(driver) => {
@@ -569,10 +704,16 @@ export default function DriversPage() {
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                        Name
+                        Driver
                       </th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
                         Email
+                      </th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+                        Phone
+                      </th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+                        CNIC
                       </th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
                         Vehicle
@@ -588,11 +729,19 @@ export default function DriversPage() {
                         key={driver.uid}
                         className="border-b border-slate-200 hover:bg-slate-50"
                       >
-                        <td className="px-4 py-3 text-sm text-slate-900">
+                        <td className="px-4 py-3 text-sm text-slate-900 font-medium">
                           {driver.fullName}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-600">
                           {driver.email}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-600">
+                          {driver.phone || "—"}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-600 whitespace-nowrap">
+                          {driver.cnicNumber || driver.cnic || (
+                            <span className="text-slate-400">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-sm text-slate-600">
                           {driver.vehicleType} ({driver.vehiclePlate})
@@ -658,6 +807,38 @@ export default function DriversPage() {
           <Download size={18} />
           Export CSV
         </button>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <StatsCard
+          title="TOTAL DRIVERS"
+          value={stats.total}
+          label="All drivers"
+          icon={<Users size={24} />}
+          iconBg="#e0f2fe"
+          iconColor="#0284c7"
+        />
+        <StatsCard
+          title="ASSIGNED TO ROUTE"
+          value={stats.assigned}
+          label="Actively assigned"
+          icon={<GitBranch size={24} />}
+          iconBg="#f0fdf4"
+          iconColor="#16a34a"
+        />
+        <StatsCard
+          title="UNASSIGNED"
+          value={stats.unassigned}
+          label="Need route"
+          icon={
+            <div className={`text-2xl font-bold ${stats.unassigned > 0 ? "text-rose-600" : "text-slate-400"}`}>
+              <AlertCircle size={24} />
+            </div>
+          }
+          iconBg={stats.unassigned > 0 ? "#ffe4e6" : "#f1f5f9"}
+          iconColor={stats.unassigned > 0 ? "#e11d48" : "#64748b"}
+        />
       </div>
 
       {/* Tabs */}
@@ -786,22 +967,37 @@ export default function DriversPage() {
         />
       )}
 
-      {confirmDialog.type === "delete" && confirmDialog.driver && (
-        <ConfirmDialog
-          open={confirmDialog.open}
-          title="Delete Driver?"
-          message={`Delete ${confirmDialog.driver.fullName}? This will remove their account and clear assigned route/ride references.`}
-          confirmLabel="Delete"
-          destructive
-          isLoading={actionLoading}
-          onConfirm={() => {
-            handleDeleteDriver(confirmDialog.driver as User);
-          }}
-          onCancel={() =>
-            setConfirmDialog({ open: false, type: null, driver: null })
-          }
-        />
-      )}
+      {confirmDialog.type === "delete" && confirmDialog.driver && (() => {
+        const d = confirmDialog.driver as any;
+        const hasAssignedRoutes = Boolean(
+          (d.assignedRoutes && d.assignedRoutes.length > 0) ||
+          (d.assignedRouteIds && d.assignedRouteIds.length > 0) ||
+          d.routeId
+        );
+        return (
+          <ConfirmDialog
+            open={confirmDialog.open}
+            title="Delete Driver?"
+            message={
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                Are you sure you want to permanently delete <strong>{d.fullName || d.name}</strong>?
+                {hasAssignedRoutes
+                  ? " This will permanently delete their account and clear their assigned route and ride references."
+                  : " This will permanently remove their registration and account data from the database."}
+              </p>
+            }
+            confirmLabel="Delete"
+            destructive
+            isLoading={actionLoading}
+            onConfirm={() => {
+              handleDeleteDriver(confirmDialog.driver as User);
+            }}
+            onCancel={() =>
+              setConfirmDialog({ open: false, type: null, driver: null })
+            }
+          />
+        );
+      })()}
 
       {/* Detail Modal */}
       {selectedDriver && (
@@ -830,6 +1026,22 @@ export default function DriversPage() {
               driver: selectedDriver,
             });
           }}
+          onApprove={() => {
+            setDetailModalOpen(false);
+            setConfirmDialog({
+              open: true,
+              type: "approve",
+              driver: selectedDriver,
+            });
+          }}
+          onReject={() => {
+            setDetailModalOpen(false);
+            setConfirmDialog({
+              open: true,
+              type: "reject",
+              driver: selectedDriver,
+            });
+          }}
         />
       )}
 
@@ -851,55 +1063,19 @@ export default function DriversPage() {
         </div>
       </Modal>
 
-      <Modal
-        open={routePickerOpen}
-        onClose={() => setRoutePickerOpen(false)}
-        title={`Assign Route to ${driverForRouteAssign?.fullName || "Driver"}`}
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-slate-600">
-            Select a route, then continue to assign or change this driver using
-            the route assignment modal.
-          </p>
-          <select
-            value={selectedRouteId}
-            onChange={(event) => setSelectedRouteId(event.target.value)}
-            className="w-full rounded-lg border border-slate-200 px-4 py-2 text-sm outline-none focus:border-blue-500"
-          >
-            {routes.map((route) => (
-              <option key={route.routeId} value={route.routeId}>
-                {route.routeName}
-              </option>
-            ))}
-          </select>
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => setRoutePickerOpen(false)}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleOpenAssignModalFromPicker}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-            >
-              Continue
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {assignModalRoute && driverForRouteAssign && (
-        <AssignDriverModal
-          open={!!assignModalRoute}
+      {assignRoutesModalOpen && driverForRouteAssign && (
+        <AssignDriverRoutesModal
+          open={assignRoutesModalOpen}
           onClose={() => {
-            setAssignModalRoute(null);
+            setAssignRoutesModalOpen(false);
             setDriverForRouteAssign(null);
           }}
-          route={assignModalRoute}
-          initialDriverId={driverForRouteAssign.uid}
+          onSuccess={() => {
+            setAssignRoutesModalOpen(false);
+            setDriverForRouteAssign(null);
+          }}
+          driver={driverForRouteAssign}
+          routes={routes}
         />
       )}
     </section>
@@ -939,8 +1115,8 @@ function RejectDialog({
             Cancel
           </button>
           <button
-            onClick={() => onConfirm(reason || "No reason provided")}
-            disabled={!reason.trim() || isLoading}
+            onClick={() => onConfirm(reason)}
+            disabled={isLoading}
             className={`rounded-lg bg-rose-600 px-6 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed flex items-center gap-2 min-w-[120px] justify-center transition-all ${
               isLoading ? "ring-2 ring-rose-400 animate-pulse" : ""
             }`}

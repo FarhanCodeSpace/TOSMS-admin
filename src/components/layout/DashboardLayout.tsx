@@ -9,12 +9,14 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 import { collection, getDocs, limit, query } from "firebase/firestore";
+import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
+  const { currentUser, isLoading: authLoading } = useAuth();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isRouteLoading, setIsRouteLoading] = useState(false);
@@ -114,6 +116,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const warmUpQueries = async () => {
+      if (authLoading || !currentUser) {
+        return;
+      }
+
       const warmCollections = [
         COLLECTIONS.ROUTES,
         COLLECTIONS.USERS,

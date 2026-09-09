@@ -118,11 +118,13 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ error: "Route not found" }, { status: 404 });
     }
 
-    const route = routeSnap.data();
-    const feeAmount = Number(route?.feeAmount ?? 0);
+    const settingsSnap = await db.collection("settings").doc("companyInfo").get();
+    const settings = settingsSnap.data() || {};
+    const feeAmount = Number(settings.monthlyFee ?? 0);
+
     if (!Number.isFinite(feeAmount) || feeAmount <= 0) {
       return NextResponse.json(
-        { error: "Route has no fee amount configured" },
+        { error: "Global monthly fee is not configured" },
         { status: 400 },
       );
     }

@@ -4,10 +4,12 @@ import Image from "next/image";
 import { User, Route } from "@/types";
 import { Eye, Pause, Trash2 } from "lucide-react";
 import Badge from "@/components/ui/Badge";
+import { formatDisplayPhone } from "@/lib/utils";
 
 interface DriverTableProps {
   drivers: User[];
   routes: Route[];
+  dailyAverages?: Record<string, number>;
   // eslint-disable-next-line no-unused-vars
   onViewDriver: (...args: [User]) => void;
   // eslint-disable-next-line no-unused-vars
@@ -36,17 +38,21 @@ function getInitials(name: string): string {
     .slice(0, 2);
 }
 
+import { getRouteAssignedDriverIds } from "@/utils/routeAssignments";
+
 export default function DriverTable({
   drivers,
   routes,
+  dailyAverages,
   onViewDriver,
   onSuspend,
   onAssignRoute,
   onDelete,
 }: DriverTableProps) {
-  const getAssignedRouteName = (driverId: string): string => {
-    const route = routes.find((r) => r.assignedDriverId === driverId);
-    return route ? route.routeName : "Unassigned";
+  const getAssignedRouteNames = (driverId: string): string[] => {
+    return routes
+      .filter((r) => getRouteAssignedDriverIds(r).includes(driverId))
+      .map((r) => r.routeName);
   };
 
   const getRatingStars = (rating?: number): string => {
@@ -59,51 +65,54 @@ export default function DriverTable({
       <table className="w-full">
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-              Name
+            <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900 min-w-[220px]">
+              Driver
             </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+            <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900 min-w-[250px]">
               Email
             </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+            <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900 min-w-[150px]">
               Phone
             </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+            <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900 min-w-[160px]">
+              CNIC
+            </th>
+            <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900 min-w-[180px]">
               Vehicle
             </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+            <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900 min-w-[120px]">
               Capacity
             </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-              Assigned Route
+            <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900 min-w-[180px]">
+              Assigned Routes
             </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+            <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900 min-w-[120px]">
               Rating
             </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+            <th className="px-6 py-3.5 text-left text-sm font-semibold text-slate-900 min-w-[120px]">
               Status
             </th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+            <th className="px-6 py-3.5 text-center text-sm font-semibold text-slate-900 min-w-[180px]">
               Actions
             </th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-slate-200">
           {drivers.map((driver) => {
-            const assignedRouteName = getAssignedRouteName(driver.uid);
-            const hasRoute = assignedRouteName !== "Unassigned";
+            const assignedRouteNames = getAssignedRouteNames(driver.uid);
+            const hasRoute = assignedRouteNames.length > 0;
 
             return (
               <tr
                 key={driver.uid}
-                className="border-b border-slate-200 hover:bg-slate-50 transition"
+                className="hover:bg-slate-50 transition"
               >
-                <td className="px-4 py-3">
+                <td className="px-6 py-4 whitespace-nowrap min-w-[220px]">
                   <div className="flex items-center gap-3">
                     {driver.profileImageUrl ? (
                       <Image
                         src={driver.profileImageUrl}
-                        alt={driver.fullName}
+                        alt={driver.fullName || ""}
                         width={32}
                         height={32}
                         unoptimized
@@ -111,7 +120,7 @@ export default function DriverTable({
                       />
                     ) : (
                       <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-semibold">
-                        {getInitials(driver.fullName)}
+                        {getInitials(driver.fullName || "")}
                       </div>
                     )}
                     <span className="text-sm font-medium text-slate-900">
@@ -119,13 +128,18 @@ export default function DriverTable({
                     </span>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-sm text-slate-600">
+                <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap min-w-[250px]">
                   {driver.email}
                 </td>
-                <td className="px-4 py-3 text-sm text-slate-600">
-                  {driver.phone}
+                <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap min-w-[150px]">
+                  {formatDisplayPhone(driver.phone || (driver as any).phoneNumber)}
                 </td>
-                <td className="px-4 py-3 text-sm text-slate-900">
+                <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap min-w-[160px]">
+                  {driver.cnicNumber || driver.cnic || (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
+                <td className="px-6 py-4 text-sm text-slate-900 whitespace-nowrap min-w-[180px]">
                   <span className="mr-2">
                     {getVehicleIcon(driver.vehicleType)}
                   </span>
@@ -135,28 +149,30 @@ export default function DriverTable({
                     : "N/A"}{" "}
                   ({driver.vehiclePlate || "N/A"})
                 </td>
-                <td className="px-4 py-3 text-sm text-slate-600">
+                <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap min-w-[120px]">
                   {driver.vehicleCapacity || "N/A"}
                 </td>
-                <td className="px-4 py-3 text-sm">
-                  <span
-                    className={
-                      assignedRouteName === "Unassigned"
-                        ? "text-slate-400"
-                        : "text-slate-900 font-medium"
-                    }
-                  >
-                    {assignedRouteName}
-                  </span>
+                <td className="px-6 py-4 text-sm min-w-[180px]">
+                  <div className="flex flex-wrap gap-1">
+                    {hasRoute ? (
+                      assignedRouteNames.map((name, idx) => (
+                        <span key={idx} className="inline-block rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 whitespace-nowrap">
+                          {name}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-slate-400 whitespace-nowrap">No Route Assigned</span>
+                    )}
+                  </div>
                 </td>
-                <td className="px-4 py-3 text-sm text-slate-900">
-                  {getRatingStars(driver.rating)}
+                <td className="px-6 py-4 text-sm text-slate-900 whitespace-nowrap min-w-[120px]">
+                  {getRatingStars(dailyAverages?.[driver.uid] || 0.0)}
                 </td>
-                <td className="px-4 py-3">
-                  <Badge status={driver.status} />
+                <td className="px-6 py-4 whitespace-nowrap min-w-[120px]">
+                  <Badge status={driver.status === "approved" ? "active" : driver.status} />
                 </td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-2">
+                <td className="px-6 py-4 whitespace-nowrap min-w-[180px]">
+                  <div className="flex items-center justify-center gap-2">
                     <button
                       onClick={() => onAssignRoute(driver)}
                       className="rounded-lg border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"

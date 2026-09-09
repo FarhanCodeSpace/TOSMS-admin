@@ -9,13 +9,13 @@ type DriverStatus = "available" | "not_available" | "no_response";
 
 type RouteReport = {
   route: Route;
-  driver: {
+  drivers: {
     name: string;
     phone?: string;
     status: DriverStatus;
     note?: string;
     vehicleAvailable?: boolean;
-  };
+  }[];
   students: StudentAvailabilityRowData[];
   counts: {
     available: number;
@@ -176,8 +176,8 @@ export default function PrintableAvailabilityReport({
                     {report.route.routeName}
                   </h4>
                   <p className="text-sm text-slate-600 mt-1">
-                    Departure: {formatTimeTo12Hour(report.route.departureTime)}{" "}
-                    • {(report.route.studentIds || []).length} students
+                    {report.route.departureTime ? `Departure: ${formatTimeTo12Hour(report.route.departureTime)} • ` : ""}
+                    {(report.route.studentIds || []).length} students
                   </p>
                 </div>
               </div>
@@ -185,41 +185,45 @@ export default function PrintableAvailabilityReport({
 
             <div className="ml-0 mb-4">
               <div className="text-sm font-semibold text-slate-900 mb-2">
-                Driver
+                Drivers
               </div>
-              <div className="bg-slate-50 p-3 rounded border border-slate-200">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <p className="font-semibold text-slate-900">
-                      {report.driver.name}
-                    </p>
-                    <p className="text-xs text-slate-600">
-                      {report.driver.phone || "No phone on file"}
-                    </p>
+              <div className="flex flex-col gap-2">
+                {report.drivers.map((driver, dIdx) => (
+                  <div key={dIdx} className="bg-slate-50 p-3 rounded border border-slate-200">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <p className="font-semibold text-slate-900">
+                          {driver.name}
+                        </p>
+                        <p className="text-xs text-slate-600">
+                          {driver.phone || "No phone on file"}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-bold">
+                          {getStatusLabel(driver.status)}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {driver.status === "available"
+                            ? "Ready"
+                            : driver.status === "not_available"
+                              ? "Unavailable"
+                              : "No Response"}
+                        </p>
+                      </div>
+                    </div>
+                    {driver.note && (
+                      <p className="text-xs text-slate-700 border-t border-slate-200 pt-2">
+                        Note: {driver.note}
+                      </p>
+                    )}
+                    {driver.vehicleAvailable === false && (
+                      <p className="text-xs text-rose-700 font-semibold border-t border-slate-200 pt-2">
+                        Vehicle Status: Unavailable
+                      </p>
+                    )}
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold">
-                      {getStatusLabel(report.driver.status)}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {report.driver.status === "available"
-                        ? "Ready"
-                        : report.driver.status === "not_available"
-                          ? "Unavailable"
-                          : "No Response"}
-                    </p>
-                  </div>
-                </div>
-                {report.driver.note && (
-                  <p className="text-xs text-slate-700 border-t border-slate-200 pt-2">
-                    Note: {report.driver.note}
-                  </p>
-                )}
-                {report.driver.vehicleAvailable === false && (
-                  <p className="text-xs text-rose-700 font-semibold border-t border-slate-200 pt-2">
-                    Vehicle Status: Unavailable
-                  </p>
-                )}
+                ))}
               </div>
             </div>
 
@@ -275,6 +279,9 @@ export default function PrintableAvailabilityReport({
                             Pickup Stop
                           </th>
                           <th className="text-left px-3 py-2 font-semibold text-slate-900">
+                            Drop Stop
+                          </th>
+                          <th className="text-left px-3 py-2 font-semibold text-slate-900">
                             Status
                           </th>
                           <th className="text-left px-3 py-2 font-semibold text-slate-900">
@@ -296,6 +303,9 @@ export default function PrintableAvailabilityReport({
                             </td>
                             <td className="px-3 py-2 text-slate-700">
                               {student.pickupStop || "-"}
+                            </td>
+                            <td className="px-3 py-2 text-slate-700">
+                              {student.dropStop ? student.dropStop : <span className="text-slate-400">Not set</span>}
                             </td>
                             <td className="px-3 py-2">
                               <span className="font-semibold">

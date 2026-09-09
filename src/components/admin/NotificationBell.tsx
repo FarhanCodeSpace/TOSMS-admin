@@ -19,6 +19,7 @@ import { formatDistanceToNow } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/context/AuthContext";
 
 interface NotificationItem {
   id: string;
@@ -31,6 +32,7 @@ interface NotificationItem {
 }
 
 export default function NotificationBell() {
+  const { currentUser, isLoading: authLoading } = useAuth();
   const [drivers, setDrivers] = useState<NotificationItem[]>([]);
   const [fees, setFees] = useState<NotificationItem[]>([]);
   const [unassigned, setUnassigned] = useState<NotificationItem[]>([]);
@@ -42,6 +44,15 @@ export default function NotificationBell() {
 
   // Fetch pending drivers
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setDrivers([]);
+      return;
+    }
+
     const q = query(
       collection(db, COLLECTIONS.USERS),
       where("role", "==", "driver"),
@@ -53,6 +64,7 @@ export default function NotificationBell() {
         const items: NotificationItem[] = [];
         snapshot.docs.forEach((doc) => {
           const data = doc.data();
+          if (data.status === "rejected") return;
           if (data.profileComplete === true) {
             items.push({
               id: `driver-${doc.id}`,
@@ -72,10 +84,19 @@ export default function NotificationBell() {
       }
     );
     return unsubscribe;
-  }, []);
+  }, [authLoading, currentUser]);
 
   // Fetch pending fee payments
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setFees([]);
+      return;
+    }
+
     const q = query(
       collection(db, COLLECTIONS.FEE_PAYMENTS),
       where("paymentStatus", "==", "submitted"),
@@ -105,10 +126,19 @@ export default function NotificationBell() {
       }
     );
     return unsubscribe;
-  }, []);
+  }, [authLoading, currentUser]);
 
   // Fetch unassigned students
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setUnassigned([]);
+      return;
+    }
+
     const q = query(
       collection(db, COLLECTIONS.USERS),
       where("role", "==", "student"),
@@ -139,7 +169,7 @@ export default function NotificationBell() {
       }
     );
     return unsubscribe;
-  }, []);
+  }, [authLoading, currentUser]);
 
   // Load read notification IDs from local storage
   useEffect(() => {
@@ -204,7 +234,7 @@ export default function NotificationBell() {
       localStorage.setItem("tosms_read_notifications", JSON.stringify(updated));
     }
     setIsOpen(false);
-    router.push(notif.actionLink);
+    router.push(notif.actionLink as any);
   };
 
   const markAllRead = () => {
@@ -227,33 +257,48 @@ export default function NotificationBell() {
   };
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div 
+      className="relative" 
+      ref={dropdownRef}
+      onMouseEnter={() => setIsOpen(true)}
+      onMouseLeave={() => setIsOpen(false)}
+    >
       <motion.button
         animate={shouldShake ? { rotate: [0, -10, 10, -10, 10, 0] } : {}}
         transition={{ duration: 0.5 }}
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          setIsOpen(false);
+          router.push("/dashboard/notifications");
+        }}
         className="relative p-2 rounded-lg hover:bg-[var(--surface-secondary)] transition-colors"
       >
         <Bell className="h-5 w-5 text-[var(--text-muted)]" />
-        {unreadCount > 0 && (
+        {notifications.length > 0 && (
           <span className="absolute top-1 right-1 w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center border-2 border-[var(--surface)]">
-            {unreadCount > 9 ? "9+" : unreadCount}
+            {notifications.length > 9 ? "9+" : notifications.length}
           </span>
         )}
       </motion.button>
 
       <AnimatePresence>
         {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            className="absolute right-0 mt-2 w-80 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-2xl z-50 overflow-hidden"
-          >
+          <div className="absolute right-0 pt-2 z-50">
+            <motion.div
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+              className="w-80 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden"
+            >
             <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-              <span className="font-semibold text-[var(--text)]">
+              <button 
+                onClick={() => {
+                  setIsOpen(false);
+                  router.push("/dashboard/notifications");
+                }}
+                className="font-semibold text-[var(--text)] hover:text-[var(--primary)] transition-colors"
+              >
                 Notifications
-              </span>
+              </button>
               {unreadCount > 0 && (
                 <button
                   onClick={markAllRead}
@@ -305,7 +350,8 @@ export default function NotificationBell() {
                 ))
               )}
             </div>
-          </motion.div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

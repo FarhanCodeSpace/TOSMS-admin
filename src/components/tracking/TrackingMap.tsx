@@ -14,6 +14,7 @@ L.Icon.Default.mergeOptions({
 
 type TrackingMapProps = {
   activeRides: ActiveTrackingRide[];
+  selectedRideId?: string | null;
   focusedDriverId: string | null;
   onDriverSelect: any;
   isLoadingInitialData: boolean;
@@ -103,7 +104,15 @@ function createDriverIcon(
   });
 }
 
-function createStopIcon(number: number) {
+function createStopIcon(number: number, isCompleted: boolean = false) {
+  if (isCompleted) {
+    return L.divIcon({
+      className: "route-stop-marker-completed",
+      html: `<div style="width:24px;height:24px;border-radius:999px;background:#10b981;border:2px solid #059669;color:#ffffff;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(16,185,129,0.4);"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
+  }
   return L.divIcon({
     className: "route-stop-marker",
     html: `<div style="width:24px;height:24px;border-radius:999px;background:linear-gradient(180deg,#ffffff,#e2e8f0);border:2px solid #1e293b;color:#0f172a;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(15,23,42,0.22);">${number}</div>`,
@@ -114,6 +123,7 @@ function createStopIcon(number: number) {
 
 export default function TrackingMap({
   activeRides,
+  selectedRideId,
   focusedDriverId,
   onDriverSelect,
   isLoadingInitialData,
@@ -123,6 +133,7 @@ export default function TrackingMap({
   const markerRefs = useRef<Record<string, L.Marker | null>>({});
   const routeLayerRefs = useRef<Record<string, L.LayerGroup | null>>({});
   const didFitBoundsRef = useRef(false);
+  const prevSelectedRideIdRef = useRef<string | null | undefined>(undefined);
   const [hasMounted, setHasMounted] = useState(false);
 
   useEffect(() => {
@@ -241,8 +252,17 @@ export default function TrackingMap({
     const map = mapRef.current;
     if (!map) return;
 
+    const boundsChanged = prevSelectedRideIdRef.current !== selectedRideId;
+    
+    if (boundsChanged) {
+      Object.values(markerRefs.current).forEach((marker) => marker?.remove());
+      markerRefs.current = {};
+      Object.values(routeLayerRefs.current).forEach((layer) => layer?.remove());
+      routeLayerRefs.current = {};
+    }
+
     const activeDriverIds = new Set<string>();
-    const activeRouteIds = new Set<string>();
+    const activeRideIds = new Set<string>();
     const boundsPoints: [number, number][] = [];
 
     activeRides.forEach((ride) => {
@@ -266,7 +286,7 @@ export default function TrackingMap({
           <div style="font-size:14px;font-weight:700;color:#0f172a;">${ride.driverName}</div>
           <div style="color:#334155;">${ride.routeName}</div>
           <div style="color:#334155;">Vehicle: ${ride.vehiclePlate || "N/A"}</div>
-          <div style="color:#334155;">Speed: ${Math.max(0, Math.round(ride.speed))} km/h</div>
+          <div style="color:#334155;">Speed: ${Math.max(0, Math.round(ride.speed ?? 0))} km/h</div>
           <div style="color:#64748b;">Updated ${updatedDiffSeconds} seconds ago</div>
         </div>
       `;
@@ -275,19 +295,21 @@ export default function TrackingMap({
       if (!marker) {
         marker = L.marker([lat, lng], {
           icon: driverIcon,
+          zIndexOffset: 1000,
         }).addTo(map);
         marker.on("click", () => onDriverSelect(ride.driverId));
         markerRefs.current[ride.driverId] = marker;
       } else {
         marker.setLatLng([lat, lng]);
         marker.setIcon(driverIcon);
+        marker.setZIndexOffset(1000);
       }
 
       marker.bindPopup(popupContent);
       boundsPoints.push([lat, lng]);
 
       if (ride.routeId && ride.routeStops?.length) {
-        activeRouteIds.add(ride.routeId);
+        activeRideIds.add(ride.rideId);
         const routeColor = colorFromRouteId(ride.routeId);
         const orderedStops = [...ride.routeStops].sort(
           (a, b) => a.order - b.order,
@@ -304,10 +326,10 @@ export default function TrackingMap({
 
         boundsPoints.push(...positions);
 
-        let routeLayer = routeLayerRefs.current[ride.routeId];
+        let routeLayer = routeLayerRefs.current[ride.rideId];
         if (!routeLayer) {
           routeLayer = L.layerGroup().addTo(map);
-          routeLayerRefs.current[ride.routeId] = routeLayer;
+          routeLayerRefs.current[ride.rideId] = routeLayer;
         }
 
         routeLayer.clearLayers();
@@ -332,18 +354,25 @@ export default function TrackingMap({
         }
 
         positions.forEach((position, index) => {
+          const originalStop = orderedStops[index];
+          const isCompleted = ride.completedStops?.includes(index) || ride.completedStops?.includes(originalStop.stopName) || ride.completedStops?.includes(String(index));
           L.marker(position, {
-            icon: createStopIcon(index + 1),
+            icon: createStopIcon(index + 1, !!isCompleted),
             interactive: false,
           }).addTo(routeLayer);
         });
       }
     });
 
-    if (!didFitBoundsRef.current && boundsPoints.length > 0) {
+    if (boundsPoints.length > 0 && (!didFitBoundsRef.current || boundsChanged)) {
       const bounds = L.latLngBounds(boundsPoints);
-      map.fitBounds(bounds, { padding: [40, 40] });
-      didFitBoundsRef.current = true;
+      if (didFitBoundsRef.current && !boundsChanged) {
+        map.flyToBounds(bounds, { padding: [40, 40], duration: 0.8 });
+      } else {
+        map.fitBounds(bounds, { padding: [40, 40] });
+        didFitBoundsRef.current = true;
+      }
+      prevSelectedRideIdRef.current = selectedRideId;
     } else if (activeRides.length === 0) {
       map.setView(DEFAULT_CENTER, 11);
     }
@@ -355,13 +384,13 @@ export default function TrackingMap({
       }
     });
 
-    Object.keys(routeLayerRefs.current).forEach((routeId) => {
-      if (!activeRouteIds.has(routeId)) {
-        routeLayerRefs.current[routeId]?.remove();
-        delete routeLayerRefs.current[routeId];
+    Object.keys(routeLayerRefs.current).forEach((rideId) => {
+      if (!activeRideIds.has(rideId)) {
+        routeLayerRefs.current[rideId]?.remove();
+        delete routeLayerRefs.current[rideId];
       }
     });
-  }, [activeRides, onDriverSelect]);
+  }, [activeRides, onDriverSelect, selectedRideId]);
 
   useEffect(() => {
     if (!focusedDriverId || !mapRef.current) return;

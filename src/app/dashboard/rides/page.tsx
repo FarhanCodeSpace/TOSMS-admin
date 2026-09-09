@@ -14,18 +14,19 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { AlertTriangle, Plus, Rows4 } from "lucide-react";
+import { AlertTriangle, Clock3, Plus, Rows4, Download, Zap } from "lucide-react";
 import toast from "react-hot-toast";
 
 import BulkCreateModal from "@/components/rides/BulkCreateModal";
 import CreateRideModal from "@/components/rides/CreateRideModal";
+import DailyDispatchModal from "@/components/rides/DailyDispatchModal";
 import RideCard from "@/components/rides/RideCard";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import Modal from "@/components/ui/Modal";
 import SkeletonLoader from "@/components/ui/SkeletonLoader";
 import { COLLECTIONS } from "@/lib/collections";
 import { db } from "@/lib/firebase";
-import type { Availability, Ride, Route, User } from "@/types";
+import type { Availability, EarlyRideRequest, Ride, Route, User } from "@/types";
 import {
   formatDateDisplay,
   getDateString,
@@ -36,6 +37,8 @@ import {
   formatTimestamp,
   getInitials,
 } from "@/utils/formatters";
+import { getRouteAssignedDriverIds } from "@/utils/routeAssignments";
+import { buildAvailabilityMap, getStudentAvailabilityStats } from "@/utils/availabilityHelpers";
 
 type RideWithMeta = Ride & {
   activeAt?: Timestamp;
@@ -70,15 +73,25 @@ function RideStatusBadge({ status }: { status: Ride["status"] }) {
 
   if (status === "completed") {
     return (
-      <span className="inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
+      <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
         Completed
       </span>
     );
   }
 
+  if (status === "auto_cancelled" || status === "cancelled" || (status as string) === "not_completed") {
+    return (
+      <span className="inline-flex rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
+        Cancelled
+      </span>
+    );
+  }
+
+  const defaultText = status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, " ");
+
   return (
     <span className="inline-flex rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700">
-      Cancelled
+      {defaultText}
     </span>
   );
 }
@@ -124,7 +137,7 @@ function RideDetailModal({
             return {
               userId: data.userId,
               userName: data.userName,
-              pickupStop: studentProfile?.pickupStop,
+              pickupStop: (studentProfile?.routeStops && studentProfile?.routeStops[ride.routeId]?.pickupStop) || studentProfile?.pickupStop,
             };
           });
 
@@ -143,16 +156,24 @@ function RideDetailModal({
 
   if (!ride) return null;
 
+  const todayDateString = new Date().toISOString().split('T')[0];
+  const displayStatus = (ride.date < todayDateString && (ride.status === 'active' || ride.status === 'scheduled')) ? 'cancelled' : ride.status;
+
   return (
     <Modal open={open} onClose={onClose} title="Ride Details">
       <div className="space-y-5">
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <h3 className="text-lg font-bold text-slate-900">{ride.routeName}</h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-lg font-bold text-slate-900">{ride.routeName}</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <RideStatusBadge status={displayStatus} />
+            </div>
+          </div>
           <div className="mt-2 grid grid-cols-1 gap-2 text-sm text-slate-600 md:grid-cols-2">
             <p>
               Driver:{" "}
               <span className="font-semibold text-slate-900">
-                {ride.driverName}
+                {ride.driverName || "Unassigned"}
               </span>
             </p>
             <p>
@@ -161,84 +182,53 @@ function RideDetailModal({
                 {formatDateDisplay(ride.date)}
               </span>
             </p>
-            <p>
-              Departure:{" "}
-              <span className="font-semibold text-slate-900">
-                {formatTimeTo12Hour(ride.departureTime)}
+            {ride.departureTime || (ride as any).returnTime ? (
+              <p>
+                {ride.departureTime && !(ride as any).returnTime ? (
+                  <>
+                    Departure:{" "}
+                    <span className="font-semibold text-slate-900">
+                      {formatTimeTo12Hour(ride.departureTime)}
+                    </span>
+                  </>
+                ) : !ride.departureTime && (ride as any).returnTime ? (
+                  <>
+                    Return:{" "}
+                    <span className="font-semibold text-slate-900">
+                      {formatTimeTo12Hour((ride as any).returnTime)}
+                    </span>
+                  </>
+                ) : (
+                  <span className="font-semibold text-slate-900">
+                    Dep: {formatTimeTo12Hour(ride.departureTime)} | Ret: {formatTimeTo12Hour((ride as any).returnTime)}
+                  </span>
+                )}
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex justify-between items-center px-1">
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Available</span>
+              <span className="text-sm font-bold text-emerald-600">
+                {(ride as any).availabilityStats?.available || availableStudents.length || 0}
               </span>
-            </p>
-            <p>
-              Status: <RideStatusBadge status={ride.status} />
-            </p>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 p-4">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-bold text-slate-900">
-              Students Available Today
-            </h4>
-            <span className="text-xs font-semibold text-slate-500">
-              {availableStudents.length} students
-            </span>
-          </div>
-
-          {isLoading ? (
-            <div className="mt-3 space-y-2">
-              <SkeletonLoader rows={1} className="h-4 w-1/3" />
-              <SkeletonLoader rows={1} className="h-4 w-full" />
-              <SkeletonLoader rows={1} className="h-4 w-2/3" />
             </div>
-          ) : availableStudents.length === 0 ? (
-            <p className="mt-3 text-sm text-slate-500">
-              No available students for this ride date.
-            </p>
-          ) : (
-            <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
-              {availableStudents.map((student) => (
-                <div
-                  key={student.userId}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                >
-                  <p className="font-semibold text-slate-900">
-                    {student.userName}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Pickup stop: {student.pickupStop || "Not set"}
-                  </p>
-                </div>
-              ))}
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">Unavailable</span>
+              <span className="text-sm font-bold text-red-600">
+                {(ride as any).availabilityStats?.notAvailable || 0}
+              </span>
             </div>
-          )}
-        </div>
-
-        <div className="rounded-xl border border-slate-200 p-4">
-          <h4 className="text-sm font-bold text-slate-900">Boarded Count</h4>
-          <p className="mt-1 text-sm text-slate-700">
-            {ride.boardedCount || 0}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 p-4">
-          <h4 className="text-sm font-bold text-slate-900">Timeline</h4>
-          <ul className="mt-3 space-y-2 text-sm text-slate-600">
-            <li className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
-              <span>Created</span>
-              <span>{formatTimestamp(ride.createdAt)}</span>
-            </li>
-            <li className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
-              <span>Scheduled</span>
-              <span>{formatTimestamp(ride.scheduledAt || ride.createdAt)}</span>
-            </li>
-            <li className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
-              <span>Active</span>
-              <span>{formatTimestamp(ride.activeAt)}</span>
-            </li>
-            <li className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
-              <span>Completed</span>
-              <span>{formatTimestamp(ride.completedAt)}</span>
-            </li>
-          </ul>
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">No Response</span>
+              <span className="text-sm font-bold text-slate-600">
+                {(ride as any).availabilityStats?.noResponse || 0}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </Modal>
@@ -256,13 +246,14 @@ export default function RidesPage() {
 
   const [todayRides, setTodayRides] = useState<RideWithMeta[]>([]);
   const [isTodayRidesLoading, setIsTodayRidesLoading] = useState(true);
-  const [todayAvailabilityCountByRoute, setTodayAvailabilityCountByRoute] =
-    useState<Record<string, number>>({});
+  const [todayAvailabilityRecords, setTodayAvailabilityRecords] = useState<Availability[]>([]);
 
   const [allRides, setAllRides] = useState<RideWithMeta[]>([]);
   const [isAllRidesLoading, setIsAllRidesLoading] = useState(true);
-  const [availabilityCountByRouteDate, setAvailabilityCountByRouteDate] =
-    useState<Record<string, number>>({});
+  const [allAvailabilityRecords, setAllAvailabilityRecords] = useState<Availability[]>([]);
+  const [earlyRideRideIds, setEarlyRideRideIds] = useState<Set<string>>(
+    new Set(),
+  );
 
   const [rangeStart, setRangeStart] = useState(getDateString(-7));
   const [rangeEnd, setRangeEnd] = useState(getDateString(7));
@@ -273,6 +264,9 @@ export default function RidesPage() {
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [dispatchModalOpen, setDispatchModalOpen] = useState(false);
+  const [dispatchRoutes, setDispatchRoutes] = useState<Route[]>([]);
+  const [dispatchDrivers, setDispatchDrivers] = useState<{uid: string, fullName: string}[]>([]);
   const [detailModalRide, setDetailModalRide] = useState<RideWithMeta | null>(
     null,
   );
@@ -292,6 +286,45 @@ export default function RidesPage() {
       setCreateModalOpen(true);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    const cleanupPastRides = async () => {
+      try {
+        const q = query(
+          collection(db, COLLECTIONS.RIDES),
+          where("status", "in", ["scheduled", "active"])
+        );
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) return;
+
+        const batch = writeBatch(db);
+        let updateCount = 0;
+
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data() as Ride;
+          if (data.date < todayString) {
+            if (data.status === "scheduled" || data.status === "active") {
+              batch.update(docSnap.ref, {
+                status: "auto_cancelled",
+                cancelledAt: serverTimestamp(),
+              });
+              updateCount++;
+            }
+          }
+        });
+
+        if (updateCount > 0) {
+          await batch.commit();
+          console.log(`Successfully cleaned up ${updateCount} abandoned past rides.`);
+        }
+      } catch (error) {
+        console.error("Error cleaning up past rides:", error);
+      }
+    };
+
+    cleanupPastRides();
+  }, [todayString]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -362,13 +395,9 @@ export default function RidesPage() {
         where("date", "==", todayString),
       ),
       (snapshot) => {
-        const counts: Record<string, number> = {};
-        snapshot.docs.forEach((availabilityDoc) => {
-          const data = availabilityDoc.data() as Availability;
-          if (data.role !== "student" || data.isAvailable !== true) return;
-          counts[data.routeId] = (counts[data.routeId] || 0) + 1;
-        });
-        setTodayAvailabilityCountByRoute(counts);
+        setTodayAvailabilityRecords(
+          snapshot.docs.map((doc) => doc.data() as Availability)
+        );
       },
     );
 
@@ -409,19 +438,31 @@ export default function RidesPage() {
         where("date", "<=", rangeEnd),
       ),
       (snapshot) => {
-        const counts: Record<string, number> = {};
-        snapshot.docs.forEach((availabilityDoc) => {
-          const data = availabilityDoc.data() as Availability;
-          if (data.role !== "student" || data.isAvailable !== true) return;
-          const key = `${data.routeId}__${data.date}`;
-          counts[key] = (counts[key] || 0) + 1;
-        });
-        setAvailabilityCountByRouteDate(counts);
+        setAllAvailabilityRecords(
+          snapshot.docs.map((doc) => doc.data() as Availability)
+        );
       },
     );
 
     return () => unsubscribe();
   }, [rangeEnd, rangeStart]);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, COLLECTIONS.EARLY_RIDE_REQUESTS),
+      (snapshot) => {
+        const rideIds = new Set<string>();
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data() as EarlyRideRequest;
+          if (data.rideId) rideIds.add(data.rideId);
+        });
+        setEarlyRideRideIds(rideIds);
+      },
+      () => {},
+    );
+
+    return () => unsubscribe();
+  }, []);
 
   const filteredAllRides = useMemo(() => {
     return allRides
@@ -434,9 +475,73 @@ export default function RidesPage() {
       .sort((a, b) => {
         const dateCompare = b.date.localeCompare(a.date);
         if (dateCompare !== 0) return dateCompare;
-        return a.departureTime.localeCompare(b.departureTime);
+        return String(a.departureTime).localeCompare(String(b.departureTime));
       });
   }, [allRides, routeFilter, statusFilter]);
+
+  const todayAvailabilityMap = useMemo(() => buildAvailabilityMap(todayAvailabilityRecords), [todayAvailabilityRecords]);
+  const allAvailabilityMap = useMemo(() => buildAvailabilityMap(allAvailabilityRecords, true), [allAvailabilityRecords]);
+
+  const exportToCSV = useCallback(() => {
+    if (!filteredAllRides || filteredAllRides.length === 0) {
+      toast.error("No rides to export.");
+      return;
+    }
+
+    const headers = [
+      "Date",
+      "Route Name",
+      "Driver Name",
+      "Schedule",
+      "Status",
+      "Available Students",
+      "Unavailable Students",
+      "No Response"
+    ];
+
+    const rows = filteredAllRides.map(ride => {
+      const route = routes.find(r => r.routeId === ride.routeId);
+      const studentIds = route?.studentIds || [];
+      
+      const stats = getStudentAvailabilityStats(studentIds, ride.routeId, allAvailabilityMap, ride.date);
+      
+      const scheduleParts = [];
+      if (ride.departureTime) scheduleParts.push(`Dep: ${formatTimeTo12Hour(ride.departureTime)}`);
+      if ((ride as any).returnTime) scheduleParts.push(`Ret: ${formatTimeTo12Hour((ride as any).returnTime)}`);
+      const schedule = scheduleParts.join(" | ") || "N/A";
+
+      const todayDateString = new Date().toISOString().split('T')[0];
+      const displayStatus = (ride.date < todayDateString && (ride.status === 'active' || ride.status === 'scheduled')) ? 'cancelled' : ride.status;
+
+      return [
+        ride.date,
+        `"${ride.routeName}"`,
+        `"${ride.driverName || 'Unassigned'}"`,
+        `"${schedule}"`,
+        displayStatus,
+        stats.availableCount.toString(),
+        stats.notAvailableCount.toString(),
+        stats.noResponseCount.toString()
+      ];
+    });
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map(row => row.join(","))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute("href", url);
+    link.setAttribute("download", `rides_export_${getDateString(0)}.csv`);
+    link.style.visibility = "hidden";
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [filteredAllRides, allAvailabilityMap, routes]);
 
   const handleMarkCompleted = async (ride: RideWithMeta) => {
     setIsMarkingCompleted(true);
@@ -477,7 +582,7 @@ export default function RidesPage() {
   const handleCreateAllTodayRides = useCallback(async () => {
     setIsCreatingTodayAll(true);
     try {
-      const [activeRoutesSnap, existingTodaySnap] = await Promise.all([
+      const [activeRoutesSnap, existingTodaySnap, driversSnap] = await Promise.all([
         getDocs(
           query(
             collection(db, COLLECTIONS.ROUTES),
@@ -490,6 +595,13 @@ export default function RidesPage() {
             where("date", "==", todayString),
           ),
         ),
+        getDocs(
+          query(
+            collection(db, COLLECTIONS.USERS),
+            where("role", "==", "driver"),
+            where("status", "in", ["active", "approved"])
+          )
+        )
       ]);
 
       const existingRouteIds = new Set(
@@ -498,43 +610,30 @@ export default function RidesPage() {
         ),
       );
 
+      const driversList = driversSnap.docs.map(doc => ({ uid: doc.id, fullName: doc.data().fullName || "Unknown Driver" }));
+
       const activeRoutes = activeRoutesSnap.docs.map((routeDoc) => ({
         ...(routeDoc.data() as Route),
         routeId: routeDoc.id,
       }));
 
-      const routesToCreate = activeRoutes.filter(
-        (route) => !existingRouteIds.has(route.routeId),
-      );
+      const routesToCreate = activeRoutes.filter((route) => {
+        if (existingRouteIds.has(route.routeId)) return false;
+        const assignedIds = getRouteAssignedDriverIds(route);
+        return assignedIds.length > 0;
+      });
 
       if (routesToCreate.length === 0) {
-        toast("All active routes already have today's rides");
+        toast("All active valid routes already have today's rides");
         return;
       }
 
-      const batch = writeBatch(db);
-      routesToCreate.forEach((route) => {
-        const rideRef = doc(collection(db, COLLECTIONS.RIDES));
-        batch.set(rideRef, {
-          rideId: rideRef.id,
-          routeId: route.routeId,
-          routeName: route.routeName || "Unnamed Route",
-          assignedDriverId: route.assignedDriverId || "",
-          driverName: route.assignedDriverName || "Unassigned Driver",
-          date: todayString,
-          departureTime: route.departureTime || "08:00",
-          status: "scheduled",
-          boardedCount: 0,
-          createdAt: serverTimestamp(),
-          scheduledAt: serverTimestamp(),
-        });
-      });
-
-      await batch.commit();
-      toast.success(`Created ${routesToCreate.length} rides for today`);
+      setDispatchRoutes(routesToCreate);
+      setDispatchDrivers(driversList);
+      setDispatchModalOpen(true);
     } catch (error) {
       console.error("Error creating today's rides:", error);
-      toast.error("Failed to create today's rides");
+      toast.error("Failed to prepare today's rides");
     } finally {
       setIsCreatingTodayAll(false);
     }
@@ -610,19 +709,36 @@ export default function RidesPage() {
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {todayRides
               .slice()
-              .sort((a, b) => a.departureTime.localeCompare(b.departureTime))
-              .map((ride) => (
-                <RideCard
-                  key={ride.rideId}
-                  ride={ride}
-                  availableStudentsCount={
-                    todayAvailabilityCountByRoute[ride.routeId] || 0
-                  }
-                  onViewDetails={() => setDetailModalRide(ride)}
-                  onCancelRide={() => setCancelRideTarget(ride)}
-                  onMarkCompleted={() => void handleMarkCompleted(ride)}
-                />
-              ))}
+              .sort((a, b) =>
+                String(a.departureTime).localeCompare(String(b.departureTime)),
+              )
+              .map((ride) => {
+                const route = routes.find(r => r.routeId === ride.routeId);
+                const studentIds = route?.studentIds || [];
+                
+                const stats = getStudentAvailabilityStats(studentIds, ride.routeId, todayAvailabilityMap);
+
+                return (
+                  <RideCard
+                    key={ride.rideId}
+                    ride={ride}
+                    isEarlyRide={earlyRideRideIds.has(ride.rideId)}
+                    availableStudentsCount={stats.availableCount}
+                    notAvailableStudentsCount={stats.notAvailableCount}
+                    noResponseCount={stats.noResponseCount}
+                    onViewDetails={() => setDetailModalRide({
+                      ...ride,
+                      availabilityStats: {
+                        available: stats.availableCount,
+                        notAvailable: stats.notAvailableCount,
+                        noResponse: stats.noResponseCount
+                      }
+                    } as any)}
+                    onCancelRide={() => setCancelRideTarget(ride)}
+                    onMarkCompleted={() => void handleMarkCompleted(ride)}
+                  />
+                );
+              })}
           </div>
         )}
       </section>
@@ -630,6 +746,14 @@ export default function RidesPage() {
       <section className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-[var(--text)]">All Rides</h2>
+          <button
+            type="button"
+            onClick={exportToCSV}
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-600 px-3 py-1.5 text-sm font-semibold text-emerald-600 transition hover:bg-emerald-50"
+          >
+            <Download className="h-4 w-4" />
+            Export CSV
+          </button>
         </div>
 
         <div className="grid grid-cols-1 gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-secondary)] p-3 md:grid-cols-4">
@@ -679,7 +803,8 @@ export default function RidesPage() {
               <option value="scheduled">Scheduled</option>
               <option value="active">Active</option>
               <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
+              <option value="cancelled">Cancelled (Manual)</option>
+              <option value="auto_cancelled">Cancelled (Auto)</option>
             </select>
           </label>
         </div>
@@ -701,7 +826,7 @@ export default function RidesPage() {
                     Date
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Departure
+                    Schedule
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Status
@@ -710,27 +835,40 @@ export default function RidesPage() {
                     Available Students
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Boarded Count
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Actions
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)] bg-[var(--surface)]">
                 {filteredAllRides.map((ride) => {
-                  const availabilityKey = `${ride.routeId}__${ride.date}`;
-                  const availableCount =
-                    availabilityCountByRouteDate[availabilityKey] || 0;
+                  const route = routes.find(r => r.routeId === ride.routeId);
+                  const studentIds = route?.studentIds || [];
+                  const stats = getStudentAvailabilityStats(studentIds, ride.routeId, allAvailabilityMap, ride.date);
+                  const availableCount = stats.availableCount;
 
                   return (
                     <tr
                       key={ride.rideId}
-                      onClick={() => setDetailModalRide(ride)}
+                      onClick={() => setDetailModalRide({
+                        ...ride,
+                        availabilityStats: {
+                          available: stats.availableCount,
+                          notAvailable: stats.notAvailableCount,
+                          noResponse: stats.noResponseCount
+                        }
+                      } as any)}
                       className="cursor-pointer transition hover:bg-slate-50"
                     >
                       <td className="px-4 py-3 text-sm font-semibold text-slate-900">
-                        {ride.routeName}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span>{ride.routeName}</span>
+                          {earlyRideRideIds.has(ride.rideId) ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <Zap fill="currentColor" size={12} />
+                              Early Ride
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         <div className="flex items-center gap-2">
@@ -744,18 +882,16 @@ export default function RidesPage() {
                         {formatDateDisplay(ride.date)}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
-                        {formatTimeTo12Hour(ride.departureTime)}
+                        <div className="flex flex-col gap-1 text-xs">
+                          {ride.departureTime && <span>Dep: {formatTimeTo12Hour(ride.departureTime)}</span>}
+                          {ride.returnTime && <span>Ret: {formatTimeTo12Hour(ride.returnTime)}</span>}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         <RideStatusBadge status={ride.status} />
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         {availableCount}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">
-                        {ride.status === "active" || ride.status === "completed"
-                          ? ride.boardedCount || 0
-                          : "-"}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         <div
@@ -796,7 +932,7 @@ export default function RidesPage() {
                 {filteredAllRides.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={7}
                       className="px-4 py-8 text-center text-sm text-slate-500"
                     >
                       No rides found for selected filters.
@@ -837,6 +973,14 @@ export default function RidesPage() {
         onCancel={() => setCancelRideTarget(null)}
         destructive
         isLoading={isCancelling}
+      />
+
+      <DailyDispatchModal
+        open={dispatchModalOpen}
+        onClose={() => setDispatchModalOpen(false)}
+        routesToCreate={dispatchRoutes}
+        driversList={dispatchDrivers}
+        todayString={todayString}
       />
 
       {(isMarkingCompleted || isCreatingTodayAll) && (

@@ -17,6 +17,8 @@ import Badge from "@/components/ui/Badge";
 import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
 import { useAuth } from "@/context/AuthContext";
+import { updateRouteDrivers } from "@/utils/firestoreHelpers";
+import { getRouteAssignedDriverIds } from "@/utils/routeAssignments";
 import { Route, User } from "@/types";
 
 type AssignDriverModalProps = {
@@ -24,6 +26,7 @@ type AssignDriverModalProps = {
   onClose: () => void;
   route: Route;
   initialDriverId?: string;
+  onSuccess?: () => void;
 };
 
 type DriverWithCurrentRoute = User & {
@@ -35,10 +38,11 @@ export default function AssignDriverModal({
   onClose,
   route,
   initialDriverId,
+  onSuccess,
 }: AssignDriverModalProps) {
   const { currentUser, isLoading: authLoading } = useAuth();
   const [drivers, setDrivers] = useState<DriverWithCurrentRoute[]>([]);
-  const [selectedDriverId, setSelectedDriverId] = useState("");
+  const [selectedDriverIds, setSelectedDriverIds] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -51,7 +55,9 @@ export default function AssignDriverModal({
       return;
     }
 
-    setSelectedDriverId(initialDriverId || route.assignedDriverId || "");
+    setSelectedDriverIds(
+      new Set(getRouteAssignedDriverIds(route)),
+    );
     setSearchTerm("");
 
     const loadData = async () => {
@@ -63,7 +69,7 @@ export default function AssignDriverModal({
             query(
               collection(db, COLLECTIONS.USERS),
               where("role", "==", "driver"),
-              where("status", "==", "active"),
+              where("status", "in", ["active", "approved"]),
             ),
           ),
         ]);
@@ -101,15 +107,22 @@ export default function AssignDriverModal({
   }, [
     open,
     route.assignedDriverId,
+    route.assignedDriverIds,
     route.routeId,
     initialDriverId,
     authLoading,
     currentUser,
   ]);
 
-  const selectedDriver = useMemo(
-    () => drivers.find((driver) => driver.uid === selectedDriverId) || null,
-    [drivers, selectedDriverId],
+  const warningDrivers = useMemo(
+    () =>
+      drivers.filter(
+        (driver) =>
+          selectedDriverIds.has(driver.uid) &&
+          driver.routeId &&
+          driver.routeId !== route.routeId,
+      ),
+    [drivers, selectedDriverIds, route.routeId],
   );
 
   const filteredDrivers = useMemo(() => {
@@ -131,63 +144,39 @@ export default function AssignDriverModal({
     });
   }, [drivers, searchTerm]);
 
-  const warningRouteName =
-    selectedDriver?.routeId && selectedDriver.routeId !== route.routeId
-      ? selectedDriver.currentRouteName || "another route"
-      : null;
+  const currentDriverIds = useMemo(() => getRouteAssignedDriverIds(route), [route]);
 
   const handleAssignDriver = async () => {
-    if (!selectedDriver) {
-      toast.error("Please select a driver");
-      return;
-    }
-
     if (!currentUser) {
       toast.error("Authentication required to assign drivers");
       return;
     }
 
+    if (selectedDriverIds.size === 0) {
+      toast.error("Please select at least one driver");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const batch = writeBatch(db);
-
-      const currentRouteRef = doc(db, COLLECTIONS.ROUTES, route.routeId);
-      const selectedDriverRef = doc(db, COLLECTIONS.USERS, selectedDriver.uid);
-
-      batch.update(currentRouteRef, {
-        assignedDriverId: selectedDriver.uid,
-        assignedDriverName: selectedDriver.fullName,
-      });
-
-      batch.update(selectedDriverRef, {
-        routeId: route.routeId,
-      });
-
-      if (selectedDriver.routeId && selectedDriver.routeId !== route.routeId) {
-        const previousRouteRef = doc(
-          db,
-          COLLECTIONS.ROUTES,
-          selectedDriver.routeId,
-        );
-        batch.update(previousRouteRef, {
-          assignedDriverId: "",
-          assignedDriverName: "",
-        });
-      }
-
-      const previousDriverId = route.assignedDriverId;
-      if (previousDriverId && previousDriverId !== selectedDriver.uid) {
-        const previousDriverRef = doc(db, COLLECTIONS.USERS, previousDriverId);
-        batch.update(previousDriverRef, {
-          routeId: "",
-        });
-      }
-
-      await batch.commit();
-      toast.success(
-        "Driver assigned successfully! They will see this route in their mobile app.",
+      await updateRouteDrivers(
+        route.routeId,
+        Array.from(selectedDriverIds),
       );
+      toast.success(
+        `${selectedDriverIds.size} driver(s) assigned successfully!`,
+      );
+      
+      // ✅ CRITICAL FIX: Wait 1 second, then close
+      // This gives Firestore time to sync before closing
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       onClose();
+      
+      // ✅ BONUS FIX: Force parent to refetch if provided
+      if (onSuccess) {
+        onSuccess();
+      }
     } catch (error: any) {
       console.error("Error assigning driver:", error);
 
@@ -212,7 +201,7 @@ export default function AssignDriverModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={`Assign Driver to ${route.routeName}`}
+      title={`Assign Drivers to ${route.routeName}`}
       isLoading={isSubmitting}
     >
       <div className="space-y-4">
@@ -227,10 +216,24 @@ export default function AssignDriverModal({
           />
         </div>
 
-        {warningRouteName && (
+        {currentDriverIds.length > 0 && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+            <p className="font-medium">Currently assigned ({currentDriverIds.length}):</p>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {drivers
+                .filter((d) => currentDriverIds.includes(d.uid))
+                .map((driver) => (
+                  <span key={driver.uid} className="inline-block rounded bg-blue-100 px-2 py-1 text-xs font-medium">
+                    {driver.fullName}
+                  </span>
+                ))}
+            </div>
+          </div>
+        )}
+
+        {warningDrivers.length > 0 && (
           <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            This driver is currently assigned to {warningRouteName}. Assigning
-            here will remove them from that route.
+            {warningDrivers.length} selected driver(s) are currently assigned to other routes. Assigning them here will move them to this route.
           </div>
         )}
 
@@ -245,7 +248,7 @@ export default function AssignDriverModal({
             </p>
           ) : (
             filteredDrivers.map((driver) => {
-              const isSelected = selectedDriverId === driver.uid;
+              const isSelected = selectedDriverIds.has(driver.uid);
               const isAssignedElsewhere =
                 !!driver.routeId && driver.routeId !== route.routeId;
 
@@ -253,7 +256,12 @@ export default function AssignDriverModal({
                 <button
                   key={driver.uid}
                   type="button"
-                  onClick={() => setSelectedDriverId(driver.uid)}
+                  onClick={() => {
+                    const next = new Set(selectedDriverIds);
+                    if (next.has(driver.uid)) next.delete(driver.uid);
+                    else next.add(driver.uid);
+                    setSelectedDriverIds(next);
+                  }}
                   className={`w-full rounded-lg border p-3 text-left transition ${
                     isSelected
                       ? "border-blue-500 bg-blue-50"
@@ -261,6 +269,15 @@ export default function AssignDriverModal({
                   }`}
                 >
                   <div className="flex items-center gap-3">
+                    <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border ${
+                      isSelected ? "border-blue-500 bg-blue-500" : "border-slate-300 bg-white"
+                    }`}>
+                      {isSelected && (
+                        <svg className="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                      )}
+                    </div>
                     {driver.profileImageUrl ? (
                       <Image
                         src={driver.profileImageUrl}
@@ -316,10 +333,10 @@ export default function AssignDriverModal({
           </button>
           <button
             onClick={handleAssignDriver}
-            disabled={isSubmitting || !selectedDriver}
+            disabled={isSubmitting || selectedDriverIds.size === 0}
             className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isSubmitting ? "Assigning..." : "Confirm Assignment"}
+            {isSubmitting ? "Updating..." : `Assign (${selectedDriverIds.size})`}
           </button>
         </div>
       </div>

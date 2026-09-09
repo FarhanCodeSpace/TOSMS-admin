@@ -33,6 +33,8 @@ import { Availability, Route, User } from "@/types";
 import RouteAvailabilityCard from "@/components/availability/RouteAvailabilityCard";
 import { StudentAvailabilityRowData } from "@/components/availability/StudentAvailabilityRow";
 import PrintableAvailabilityReport from "@/components/availability/PrintableAvailabilityReport";
+import { getRouteAssignedDriverIds } from "@/utils/routeAssignments";
+import { buildAvailabilityMap } from "@/utils/availabilityHelpers";
 
 type AvailabilityRecord = Omit<Availability, "isAvailable" | "markedAt"> & {
   isAvailable?: boolean;
@@ -44,14 +46,15 @@ type DriverStatus = "available" | "not_available" | "no_response";
 
 type RouteReport = {
   route: Route;
-  driver: {
+  drivers: {
+    userId: string;
     name: string;
     phone?: string;
     profileImageUrl?: string;
     status: DriverStatus;
     note?: string;
     vehicleAvailable?: boolean;
-  };
+  }[];
   students: StudentAvailabilityRowData[];
   counts: {
     available: number;
@@ -285,41 +288,35 @@ export default function AvailabilityPage() {
 
   const routeReports = useMemo<RouteReport[]>(() => {
     const usersById = new Map(users.map((user) => [user.uid, user]));
-    const availabilityByCompositeKey = new Map<string, AvailabilityRecord>();
-
-    allAvailability.forEach((record) => {
-      // Primary key: user_route_role
-      availabilityByCompositeKey.set(
-        `${record.userId}_${record.routeId}_${record.role}`,
-        record,
-      );
-      // Fallback key: user_role (in case routeId is missing or mismatch in record)
-      if (!record.routeId || record.routeId === "") {
-        availabilityByCompositeKey.set(
-          `${record.userId}_${record.role}`,
-          record,
-        );
-      }
-    });
+    const availabilityByCompositeKey = buildAvailabilityMap(allAvailability);
 
     return routes.map((route) => {
       const sortAscending = sortAscByRoute[route.routeId] ?? true;
 
-      const driverUser = route.assignedDriverId
-        ? usersById.get(route.assignedDriverId)
-        : undefined;
-
-      // Try specific key first, then fallback
-      const driverRecord = route.assignedDriverId
-        ? availabilityByCompositeKey.get(
-            `${route.assignedDriverId}_${route.routeId}_driver`,
-          ) ||
-          availabilityByCompositeKey.get(`${route.assignedDriverId}_driver`)
-        : undefined;
-
-      const driverStatus = route.assignedDriverId
-        ? (getStatusFromRecord(driverRecord) as DriverStatus)
-        : "no_response";
+      const assignedDriverIds = getRouteAssignedDriverIds(route);
+      
+      let driversList: RouteReport["drivers"] = [];
+      if (assignedDriverIds.length > 0) {
+        driversList = assignedDriverIds.map(driverId => {
+          const driverUser = usersById.get(driverId);
+          const driverRecord = availabilityByCompositeKey.get(`${driverId}_${route.routeId}_driver`) || availabilityByCompositeKey.get(`${driverId}_driver`);
+          return {
+            userId: driverId,
+            name: driverUser?.fullName || "Unassigned Driver",
+            phone: driverUser?.phone,
+            profileImageUrl: driverUser?.profileImageUrl,
+            status: getStatusFromRecord(driverRecord) as DriverStatus,
+            note: driverRecord?.note,
+            vehicleAvailable: driverRecord?.vehicleAvailable,
+          };
+        }).filter(d => d.name !== "Unassigned Driver");
+      } else {
+        driversList = [{
+          userId: `unassigned_${route.routeId}`,
+          name: route.assignedDriverName || "Unassigned Driver",
+          status: "no_response",
+        }];
+      }
 
       const students = (route.studentIds || [])
         .map((studentId) => {
@@ -333,7 +330,8 @@ export default function AvailabilityPage() {
           return {
             userId: studentId,
             name: studentUser?.fullName || "Unknown Student",
-            pickupStop: studentUser?.pickupStop,
+            pickupStop: (studentUser?.routeStops && studentUser?.routeStops[route.routeId]?.pickupStop) || studentUser?.pickupStop,
+            dropStop: (studentUser?.routeStops && studentUser?.routeStops[route.routeId]?.dropStop) || studentUser?.dropStop,
             profileImageUrl: studentUser?.profileImageUrl,
             status: getStatusFromRecord(availabilityRecord),
             note: availabilityRecord?.note,
@@ -341,6 +339,7 @@ export default function AvailabilityPage() {
             reminderSent: availabilityRecord?.reminderSent,
           } as StudentAvailabilityRowData;
         })
+        .filter((s) => s.name !== "Unknown Student")
         .sort((a, b) => {
           const rankDiff = sortAscending
             ? STATUS_RANK[a.status] - STATUS_RANK[b.status]
@@ -360,8 +359,11 @@ export default function AvailabilityPage() {
       ).length;
 
       // Find last updated for this route
+      const driverRecords = assignedDriverIds.map(sid => 
+        availabilityByCompositeKey.get(`${sid}_${route.routeId}_driver`) || availabilityByCompositeKey.get(`${sid}_driver`)
+      );
       const relevantRecords = [
-        driverRecord,
+        ...driverRecords,
         ...(route.studentIds || []).map(
           (sid) =>
             availabilityByCompositeKey.get(`${sid}_${route.routeId}_student`) ||
@@ -381,17 +383,7 @@ export default function AvailabilityPage() {
 
       return {
         route,
-        driver: {
-          name:
-            driverUser?.fullName ||
-            route.assignedDriverName ||
-            "Unassigned Driver",
-          phone: driverUser?.phone,
-          profileImageUrl: driverUser?.profileImageUrl,
-          status: driverStatus,
-          note: driverRecord?.note,
-          vehicleAvailable: driverRecord?.vehicleAvailable,
-        },
+        drivers: driversList,
         students,
         counts: {
           available: availableCount,
@@ -413,21 +405,41 @@ export default function AvailabilityPage() {
     let routesReady = 0;
     let routesNeedAttention = 0;
 
+    const processedUserIds = new Set<string>();
+
     routeReports.forEach((report) => {
-      if (report.driver.status === "available") {
-        available += 1;
+      report.drivers.forEach(driver => {
+        if (!processedUserIds.has(driver.userId)) {
+          processedUserIds.add(driver.userId);
+          if (driver.status === "available") {
+            available += 1;
+          } else if (driver.status === "not_available") {
+            notAvailable += 1;
+          } else {
+            noResponse += 1;
+          }
+        }
+      });
+
+      const isRouteReady = report.drivers.some(d => d.status === "available");
+      if (isRouteReady) {
         routesReady += 1;
-      } else if (report.driver.status === "not_available") {
-        notAvailable += 1;
-        routesNeedAttention += 1;
       } else {
-        noResponse += 1;
         routesNeedAttention += 1;
       }
 
-      available += report.counts.available;
-      notAvailable += report.counts.notAvailable;
-      noResponse += report.counts.noResponse;
+      report.students.forEach(student => {
+        if (!processedUserIds.has(student.userId)) {
+          processedUserIds.add(student.userId);
+          if (student.status === "available") {
+            available += 1;
+          } else if (student.status === "not_available") {
+            notAvailable += 1;
+          } else {
+            noResponse += 1;
+          }
+        }
+      });
     });
 
     const totalPeople = available + notAvailable + noResponse;
@@ -487,16 +499,16 @@ export default function AvailabilityPage() {
       "Note",
     ];
 
-    const driverRow = [
+    const driverRows = report.drivers.map(driver => [
       report.route.routeName,
       report.route.departureTime,
       "Driver",
-      report.driver.name,
-      report.driver.phone || "",
+      driver.name,
+      driver.phone || "",
       "-",
-      report.driver.status,
-      report.driver.note || "",
-    ];
+      driver.status,
+      driver.note || "",
+    ]);
 
     const studentRows = report.students.map((student) => [
       report.route.routeName,
@@ -511,7 +523,7 @@ export default function AvailabilityPage() {
 
     const csv = [
       header.join(","),
-      [driverRow, ...studentRows]
+      [...driverRows, ...studentRows]
         .map((row) =>
           row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
         )
@@ -830,13 +842,13 @@ export default function AvailabilityPage() {
               <RouteAvailabilityCard
                 key={report.route.routeId}
                 routeName={report.route.routeName}
-                departureTime={report.route.departureTime}
+                departureTime={report.route.departureTime || ""}
                 totalStudents={(report.route.studentIds || []).length}
                 expanded={isExpanded}
                 onToggleExpanded={() =>
                   toggleRouteExpanded(report.route.routeId)
                 }
-                driver={report.driver}
+                drivers={report.drivers}
                 students={report.students}
                 studentCounts={report.counts}
                 sortAscending={sortAscending}

@@ -11,18 +11,20 @@ import {
   where,
 } from "firebase/firestore";
 import Link from "next/link";
-import { Clock, Edit, Eye, MapPin, Plus, Users } from "lucide-react";
+import { Clock, Edit, Eye, MapPin, Plus, Users, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 
-import AssignDriverModal from "@/components/routes/AssignDriverModal";
 import Badge from "@/components/ui/Badge";
 import EmptyState from "@/components/ui/EmptyState";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import SkeletonLoader from "@/components/ui/SkeletonLoader";
 import { useAuth } from "@/context/AuthContext";
 import { COLLECTIONS } from "@/lib/collections";
 import { db } from "@/lib/firebase";
 import { Route, User } from "@/types";
 import { formatTimeTo12Hour } from "@/utils/formatters";
+import { getRouteAssignedDriverIds } from "@/utils/routeAssignments";
+import { deleteRoute } from "@/utils/firestoreHelpers";
 
 import CreateRouteModal from "./CreateRouteModal";
 import EditRouteModal from "./EditRouteModal";
@@ -38,7 +40,9 @@ export default function RoutesPage() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingRoute, setEditingRoute] = useState<Route | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [assigningRoute, setAssigningRoute] = useState<Route | null>(null);
+
+  const [deletingRoute, setDeletingRoute] = useState<Route | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     const shouldOpenCreate =
@@ -127,6 +131,25 @@ export default function RoutesPage() {
     setEditModalOpen(true);
   };
 
+  const handleDeleteClick = (route: Route) => {
+    setDeletingRoute(route);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingRoute) return;
+    setIsDeleting(true);
+    try {
+      await deleteRoute(deletingRoute.routeId);
+      toast.success("Route deleted successfully");
+    } catch (error) {
+      console.error("Error deleting route:", error);
+      toast.error("Failed to delete route");
+    } finally {
+      setIsDeleting(false);
+      setDeletingRoute(null);
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
@@ -167,40 +190,61 @@ export default function RoutesPage() {
       ) : (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
           {routes.map((route) => {
-            const assignedDriver = drivers.find(
-              (driver) => driver.uid === route.assignedDriverId,
+            const assignedDriverIds = getRouteAssignedDriverIds(route);
+            const assignedDrivers = drivers.filter((driver) =>
+              assignedDriverIds.includes(driver.uid),
             );
+            const assignedDriverNames = assignedDrivers
+              .map((driver) => driver.fullName)
+              .filter(Boolean);
+
+            const sortedStops = [...(route.stops || [])].sort((a, b) => a.order - b.order);
+            const stopsSequence = sortedStops.map((s) => s.stopName).filter(Boolean);
 
             return (
               <div
                 key={route.routeId}
-                className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                className="flex h-full flex-col justify-between rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
               >
-                <div className="mb-4 flex items-start justify-between">
-                  <h3 className="flex-1 text-lg font-bold text-[var(--text)]">
-                    {route.routeName}
-                  </h3>
+                <div>
+                  <div className="mb-4 flex items-start justify-between">
+                  <div className="flex-1 pr-4">
+                    <h3 className="text-lg font-bold text-[var(--text)]">
+                      {route.routeName}
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-500 line-clamp-2">
+                      {route.description || "No description provided"}
+                    </p>
+                  </div>
                   <div
-                    className={`h-3 w-3 rounded-full ${route.isActive ? "bg-emerald-500" : "bg-slate-300"}`}
+                    className={`mt-1.5 h-3 w-3 shrink-0 rounded-full ${route.isActive ? "bg-emerald-500" : "bg-slate-300"}`}
                   />
                 </div>
 
                 <div className="mb-4 border-b border-[var(--border)] pb-4">
-                  {assignedDriver ? (
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 to-blue-600 text-xs font-semibold text-white">
-                        {(assignedDriver.fullName || "")
-                          .charAt(0)
-                          .toUpperCase()}
+                  {assignedDrivers.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+                        Assigned Drivers
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {assignedDrivers.map((driver) => (
+                          <span
+                            key={driver.uid}
+                            className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-secondary)] px-3 py-1.5 text-sm font-medium text-[var(--text)]"
+                          >
+                            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-blue-400 to-blue-600 text-[10px] font-semibold text-white">
+                              {(driver.fullName || "").charAt(0).toUpperCase()}
+                            </span>
+                            {driver.fullName}
+                          </span>
+                        ))}
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-[var(--text)]">
-                          {assignedDriver.fullName}
-                        </p>
+                      {assignedDriverNames.length > 0 ? (
                         <p className="text-xs text-[var(--text-secondary)]">
-                          {assignedDriver.vehicleType}
+                          {assignedDriverNames.join(" • ")}
                         </p>
-                      </div>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="inline-block rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
@@ -210,13 +254,20 @@ export default function RoutesPage() {
                 </div>
 
                 <div className="mb-4 space-y-3 border-b border-[var(--border)] pb-4">
-                  <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                    <Clock size={16} />
-                    <span>
-                      {formatTimeTo12Hour(route.departureTime)} -{" "}
-                      {formatTimeTo12Hour(route.returnTime)}
-                    </span>
-                  </div>
+                  {(route.departureTime || route.returnTime) ? (
+                    <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                      <Clock size={16} />
+                      <span>
+                        {route.departureTime && route.returnTime 
+                          ? `Departure: ${formatTimeTo12Hour(route.departureTime)} | Return: ${formatTimeTo12Hour(route.returnTime)}`
+                          : route.departureTime 
+                            ? `Departure: ${formatTimeTo12Hour(route.departureTime)}`
+                            : route.returnTime
+                              ? `Return: ${formatTimeTo12Hour(route.returnTime)}`
+                              : ""}
+                      </span>
+                    </div>
+                  ) : null}
 
                   <div className="flex gap-2">
                     <Badge status="active">
@@ -229,17 +280,45 @@ export default function RoutesPage() {
                     </Badge>
                   </div>
 
-                  {route.feeAmount ? (
-                    <div className="text-sm font-medium text-[var(--text)]">
-                      PKR {route.feeAmount.toLocaleString("en-PK")}{" "}
-                      <span className="text-xs text-[var(--text-secondary)]">
-                        /month
-                      </span>
+
+
+                  {stopsSequence.length > 0 && (
+                    <div className="mt-4">
+                      <div className="flex w-full items-center overflow-x-auto pb-4 pt-1 scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                        <div className="flex w-max min-w-full items-start px-1">
+                          {stopsSequence.map((stopName, idx) => {
+                            const isFirst = idx === 0;
+                            const isLast = idx === stopsSequence.length - 1;
+                            
+                            let dotColor = "bg-slate-300";
+                            if (isFirst) dotColor = "bg-blue-500 ring-2 ring-blue-100";
+                            if (isLast && stopsSequence.length > 1) dotColor = "bg-green-500 ring-2 ring-green-100";
+
+                            return (
+                              <div key={idx} className="flex flex-col items-center flex-1 min-w-[80px]">
+                                <div className="flex items-center w-full">
+                                  <div className="flex-1">
+                                    {!isFirst && <div className="h-[2px] bg-[var(--border-strong)] w-full" />}
+                                  </div>
+                                  <div className={`h-2.5 w-2.5 rounded-full z-10 flex-shrink-0 ${dotColor}`} />
+                                  <div className="flex-1">
+                                    {!isLast && <div className="h-[2px] bg-[var(--border-strong)] w-full" />}
+                                  </div>
+                                </div>
+                                <span className="mt-2 text-center text-[10px] font-medium leading-tight text-slate-500 px-1 max-w-[100px] line-clamp-2">
+                                  {stopName}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
-                  ) : null}
+                  )}
+                </div>
                 </div>
 
-                <div className="flex items-center justify-between">
+                <div className="mt-auto flex items-center justify-between pt-2">
                   <label className="flex cursor-pointer items-center gap-2">
                     <input
                       type="checkbox"
@@ -253,15 +332,6 @@ export default function RoutesPage() {
                   </label>
 
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => setAssigningRoute(route)}
-                      className="rounded-lg border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--primary)] transition hover:bg-[var(--primary-light)]"
-                    >
-                      {route.assignedDriverId
-                        ? "Change Driver"
-                        : "Assign Driver"}
-                    </button>
-
                     <Link
                       href={`/dashboard/routes/${route.routeId}`}
                       className="rounded p-2 transition hover:bg-[var(--surface-secondary)]"
@@ -278,6 +348,17 @@ export default function RoutesPage() {
                       <Edit
                         size={18}
                         className="text-[var(--text-secondary)]"
+                      />
+                    </button>
+
+                    <button
+                      onClick={() => handleDeleteClick(route)}
+                      className="rounded p-2 transition hover:bg-rose-50"
+                      title="Delete route"
+                    >
+                      <Trash2
+                        size={18}
+                        className="text-rose-500 hover:text-rose-600"
                       />
                     </button>
                   </div>
@@ -301,13 +382,17 @@ export default function RoutesPage() {
         />
       ) : null}
 
-      {assigningRoute ? (
-        <AssignDriverModal
-          open={!!assigningRoute}
-          onClose={() => setAssigningRoute(null)}
-          route={assigningRoute}
-        />
-      ) : null}
+      <ConfirmDialog
+        open={!!deletingRoute}
+        title="Delete Route?"
+        message={`Are you sure you want to delete ${deletingRoute?.routeName}? This action cannot be undone.`}
+        confirmLabel="Delete"
+        destructive
+        isLoading={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeletingRoute(null)}
+      />
+
     </section>
   );
 }

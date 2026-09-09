@@ -18,6 +18,8 @@ import { COLLECTIONS } from "@/lib/collections";
 import { db } from "@/lib/firebase";
 import type { Route, Ride } from "@/types";
 import { getTodayString } from "@/utils/dateHelpers";
+import { formatTimeTo12Hour } from "@/utils/formatters";
+import { getRouteAssignedDriverIds } from "@/utils/routeAssignments";
 
 type BulkCreateModalProps = {
   open: boolean;
@@ -25,9 +27,10 @@ type BulkCreateModalProps = {
   onCompleted?: () => void;
 };
 
-type DayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat";
+type DayKey = "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat";
 
 const DAY_LABELS: Record<DayKey, string> = {
+  sun: "Sun",
   mon: "Mon",
   tue: "Tue",
   wed: "Wed",
@@ -37,7 +40,7 @@ const DAY_LABELS: Record<DayKey, string> = {
 };
 
 const DAY_INDEX_TO_KEY: Record<number, DayKey | null> = {
-  0: null,
+  0: "sun",
   1: "mon",
   2: "tue",
   3: "wed",
@@ -61,9 +64,10 @@ export default function BulkCreateModal({
   );
 
   const [startDate, setStartDate] = useState(today);
-  const [endDate, setEndDate] = useState(defaultEnd);
+  const [endDate, setEndDate] = useState("");
 
   const [daySelection, setDaySelection] = useState<Record<DayKey, boolean>>({
+    sun: false,
     mon: true,
     tue: true,
     wed: true,
@@ -73,7 +77,9 @@ export default function BulkCreateModal({
   });
 
   const [routes, setRoutes] = useState<Route[]>([]);
+  const [drivers, setDrivers] = useState<{uid: string, fullName: string}[]>([]);
   const [selectedRouteIds, setSelectedRouteIds] = useState<string[]>([]);
+  const [selectedDriverForRoute, setSelectedDriverForRoute] = useState<Record<string, string>>({});
 
   const [loadingRoutes, setLoadingRoutes] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -85,20 +91,41 @@ export default function BulkCreateModal({
     const loadRoutes = async () => {
       setLoadingRoutes(true);
       try {
-        const routeSnap = await getDocs(
-          query(
-            collection(db, COLLECTIONS.ROUTES),
-            where("isActive", "==", true),
+        const [routeSnap, driversSnap] = await Promise.all([
+          getDocs(
+            query(
+              collection(db, COLLECTIONS.ROUTES),
+              where("isActive", "==", true),
+            ),
           ),
-        );
+          getDocs(
+            query(
+              collection(db, COLLECTIONS.USERS),
+              where("role", "==", "driver"),
+              where("status", "in", ["active", "approved"])
+            )
+          )
+        ]);
 
         const activeRoutes = routeSnap.docs.map((routeDoc) => ({
           ...(routeDoc.data() as Route),
           routeId: routeDoc.id,
         }));
 
+        const activeDrivers = driversSnap.docs.map(doc => ({
+          uid: doc.id,
+          fullName: doc.data().fullName || "Unknown Driver"
+        }));
+
+        const initialDriverSelection: Record<string, string> = {};
+        activeRoutes.forEach(route => {
+          initialDriverSelection[route.routeId] = "";
+        });
+
         setRoutes(activeRoutes);
+        setDrivers(activeDrivers);
         setSelectedRouteIds(activeRoutes.map((route) => route.routeId));
+        setSelectedDriverForRoute(initialDriverSelection);
       } catch (error) {
         console.error("Error loading active routes:", error);
         toast.error("Failed to load active routes");
@@ -108,8 +135,9 @@ export default function BulkCreateModal({
     };
 
     setStartDate(today);
-    setEndDate(defaultEnd);
+    setEndDate("");
     setDaySelection({
+      sun: false,
       mon: true,
       tue: true,
       wed: true,
@@ -159,6 +187,22 @@ export default function BulkCreateModal({
       previous.includes(routeId)
         ? previous.filter((id) => id !== routeId)
         : [...previous, routeId],
+    );
+  };
+
+  const handleSelectAll = () => {
+    const validRouteIds = routes
+      .filter((route) => {
+        const assignedIds = getRouteAssignedDriverIds(route);
+        const routeDrivers = drivers.filter(d => assignedIds.includes(d.uid));
+        return routeDrivers.length > 0;
+      })
+      .map((r) => r.routeId);
+      
+    setSelectedRouteIds(
+      selectedRouteIds.length === validRouteIds.length
+        ? []
+        : validRouteIds,
     );
   };
 
@@ -216,17 +260,23 @@ export default function BulkCreateModal({
           if (existingKeys.has(key)) {
             skipped += 1;
           } else {
+            const selectedDriverId = selectedDriverForRoute[route.routeId] || route.assignedDriverId || "";
+            const driverName = drivers.find(d => d.uid === selectedDriverId)?.fullName || route.assignedDriverName || "Unassigned Driver";
+
             const rideRef = doc(collection(db, COLLECTIONS.RIDES));
             batch.set(rideRef, {
               rideId: rideRef.id,
               routeId: route.routeId,
               routeName: route.routeName || "Unnamed Route",
-              assignedDriverId: route.assignedDriverId || "",
-              driverName: route.assignedDriverName || "Unassigned Driver",
+              driverId: selectedDriverId,
+              assignedDriverId: selectedDriverId,
+              driverName: driverName,
               date,
-              departureTime: route.departureTime || "08:00",
+              departureTime: route.departureTime || "",
+              returnTime: route.returnTime || "",
               status: "scheduled",
               boardedCount: 0,
+              studentIds: route.studentIds || [],
               createdAt: serverTimestamp(),
               scheduledAt: serverTimestamp(),
             });
@@ -264,6 +314,14 @@ export default function BulkCreateModal({
       setIsSubmitting(false);
     }
   };
+
+  const isFormValid = useMemo(() => {
+    if (!validRange || preview.rideCount === 0) return false;
+    return selectedRouteIds.every((routeId) => {
+      const driverId = selectedDriverForRoute[routeId];
+      return driverId && driverId !== "";
+    });
+  }, [validRange, preview.rideCount, selectedRouteIds, selectedDriverForRoute]);
 
   return (
     <Modal
@@ -337,18 +395,12 @@ export default function BulkCreateModal({
             <button
               type="button"
               disabled={isSubmitting || routes.length === 0}
-              onClick={() =>
-                setSelectedRouteIds(
-                  selectedRouteIds.length === routes.length
-                    ? []
-                    : routes.map((route) => route.routeId),
-                )
-              }
+              onClick={handleSelectAll}
               className="text-xs font-semibold text-blue-700"
             >
-              {selectedRouteIds.length === routes.length
+              {selectedRouteIds.length > 0
                 ? "Unselect All"
-                : "Select All"}
+                : "Select All Valid"}
             </button>
           </div>
 
@@ -358,23 +410,59 @@ export default function BulkCreateModal({
             ) : routes.length === 0 ? (
               <p className="text-sm text-slate-500">No active routes found.</p>
             ) : (
-              routes.map((route) => (
-                <label
-                  key={route.routeId}
-                  className="flex items-center gap-2 text-sm text-slate-700"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedRouteIds.includes(route.routeId)}
-                    onChange={() => toggleRoute(route.routeId)}
-                    disabled={isSubmitting}
-                  />
-                  <span>
-                    {route.routeName} -{" "}
-                    {route.assignedDriverName || "No Driver"}
-                  </span>
-                </label>
-              ))
+              routes.map((route) => {
+                const isSelected = selectedRouteIds.includes(route.routeId);
+                const assignedIds = getRouteAssignedDriverIds(route);
+                const routeDrivers = drivers.filter(d => assignedIds.includes(d.uid));
+                
+                return (
+                  <div key={route.routeId} className={`flex flex-col gap-2 rounded-lg border p-2 ${routeDrivers.length === 0 ? 'border-rose-100 bg-rose-50/50' : 'border-slate-100'}`}>
+                    <label className={`flex items-center gap-2 text-sm font-medium ${routeDrivers.length === 0 ? 'text-slate-400 cursor-not-allowed' : 'text-slate-700 cursor-pointer'}`}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleRoute(route.routeId)}
+                        disabled={isSubmitting || routeDrivers.length === 0}
+                      />
+                      <span className="flex-1">
+                        {route.routeName}
+                      </span>
+                      {(route.departureTime || route.returnTime) && (
+                        <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 whitespace-nowrap">
+                          {route.departureTime && route.returnTime 
+                            ? `${formatTimeTo12Hour(route.departureTime)} - ${formatTimeTo12Hour(route.returnTime)}`
+                            : route.departureTime 
+                              ? `Departs: ${formatTimeTo12Hour(route.departureTime)}`
+                              : `Returns: ${formatTimeTo12Hour(route.returnTime)}`}
+                        </span>
+                      )}
+                    </label>
+                    
+                    {isSelected && routeDrivers.length > 0 && (
+                      <div className="pl-6">
+                        <select
+                          value={selectedDriverForRoute[route.routeId] || ""}
+                          onChange={(e) => setSelectedDriverForRoute(prev => ({ ...prev, [route.routeId]: e.target.value }))}
+                          disabled={isSubmitting}
+                          className="w-full max-w-[200px] rounded-lg border border-slate-200 px-2 py-1 text-xs outline-none focus:border-blue-500 disabled:bg-slate-50"
+                        >
+                          <option value="" disabled>Select Driver...</option>
+                          {routeDrivers.map(driver => (
+                            <option key={driver.uid} value={driver.uid}>
+                              {driver.fullName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {routeDrivers.length === 0 && (
+                      <div className="pl-6 text-xs font-medium text-rose-500">
+                        No active drivers assigned
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
@@ -411,7 +499,7 @@ export default function BulkCreateModal({
           <button
             type="button"
             onClick={handleBulkCreate}
-            disabled={isSubmitting || !validRange || preview.rideCount === 0}
+            disabled={isSubmitting || !isFormValid}
             className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
           >
             {isSubmitting ? "Creating..." : "Create Rides"}

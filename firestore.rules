@@ -1,96 +1,771 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
-    function isSignedIn() {
+
+    // =========================================================
+    // AUTH / ROLE HELPERS
+    // =========================================================
+
+    function isAuthenticated() {
       return request.auth != null;
     }
-    
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-    
-    function isAdmin() {
-      return isSignedIn() && getUserData().role == 'admin';
-    }
-    
-    function isDriver() {
-      return isSignedIn() && getUserData().role == 'driver';
-    }
-    
-    function isStudent() {
-      return isSignedIn() && getUserData().role == 'student';
-    }
-    
+
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return isAuthenticated() &&
+        request.auth.uid == userId;
     }
 
-    // Users collection
+    function getUserData() {
+      return get(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      ).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        getUserData().get('role', '') == 'admin';
+    }
+
+    function isDriver() {
+      return isAuthenticated() &&
+        getUserData().get('role', '') == 'driver';
+    }
+
+    function isStudent() {
+      return isAuthenticated() &&
+        getUserData().get('role', '') == 'student';
+    }
+
+
+    // =========================================================
+    // ROUTE DRIVER AUTHORIZATION
+    // Supports:
+    // 1. Legacy assignedDriverId
+    // 2. Multi-driver assignedDriverIds
+    // =========================================================
+
+    function isRouteAssignedDriver(routeId) {
+      return isDriver()
+        &&
+        exists(
+          /databases/$(database)/documents/routes/$(routeId)
+        )
+        &&
+        (
+          get(
+            /databases/$(database)/documents/routes/$(routeId)
+          ).data.get('assignedDriverId', null) == request.auth.uid
+
+          ||
+
+          request.auth.uid in
+          get(
+            /databases/$(database)/documents/routes/$(routeId)
+          ).data.get('assignedDriverIds', [])
+        );
+    }
+
+
+
+    // =========================================================
+    // USERS
+    // =========================================================
+
     match /users/{userId} {
-      // Allow reading own profile or if the requester is an admin
-      allow read: if isSignedIn() && (isOwner(userId) || isAdmin());
-      // Allow admins to see all users (needed for driver/student management)
-      allow list: if isAdmin();
-      // Only admins or the owner can update the profile
-      allow write: if isAdmin() || isOwner(userId);
+
+      /*
+       * READ ACCESS
+       *
+       * Student:
+       *   - Own profile
+       *
+       * Driver:
+       *   - Own profile
+       *   - Student profiles belonging to a route
+       *     assigned to that driver
+       *
+       * Admin:
+       *   - All users
+       */
+
+      allow get: if isAuthenticated() && (
+        isOwner(userId)
+        ||
+        isAdmin()
+        ||
+        (
+          isDriver()
+          &&
+          resource.data.get('role', '') == 'student'
+        )
+        ||
+        (
+          isStudent()
+          &&
+          resource.data.get('role', '') == 'driver'
+        )
+      );
+
+      allow list: if (
+        isAuthenticated() && (
+          isOwner(userId)
+          ||
+          isAdmin()
+          ||
+          (
+            isDriver()
+            &&
+            resource.data.get('role', '') == 'student'
+            &&
+            resource.data.get('routeId', null) != null
+            &&
+            isRouteAssignedDriver(
+              resource.data.get('routeId', '')
+            )
+          )
+          ||
+          (
+            isStudent()
+            &&
+            resource.data.get('role', '') == 'driver'
+          )
+        )
+      ) || (
+        request.auth == null && request.query.limit <= 1
+      );
+
+      /*
+       * User can create their own profile.
+       * Admin can also create users.
+       */
+      allow create: if
+        isOwner(userId)
+        ||
+        isAdmin();
+
+      /*
+       * User can update own profile.
+       * Admin can update any profile.
+       */
+      allow update: if
+        isOwner(userId)
+        ||
+        isAdmin();
+
+      allow delete: if isAdmin();
     }
 
-    // Routes collection
+
+    // =========================================================
+    // ROUTES
+    // =========================================================
+
     match /routes/{routeId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+
+      allow read: if isAuthenticated();
+
+      allow create: if isAdmin();
+
+      allow update: if isAdmin();
+
+      allow delete: if isAdmin();
     }
 
-    // Rides collection
+
+    // =========================================================
+    // RIDES
+    // =========================================================
+
     match /rides/{rideId} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin();
+
+      allow read: if isAuthenticated();
+
+
+      /*
+       * =======================================================
+       * IMPORTANT SECURITY RULE
+       * =======================================================
+       *
+       * ADMIN:
+       *   Can manually create normal rides.
+       *
+       * DRIVER:
+       *   CANNOT manually create a ride.
+       *
+       * EARLY RIDE:
+       *   Driver can create ride ONLY through the validated
+       *   Early Ride Sharing transaction.
+       */
+
+      allow create:
+        if isAdmin()
+        ||
+        isValidEarlyRideSharingRideCreate(rideId);
+
+
+      /*
+       * Ride UPDATE
+       *
+       * Admin:
+       *   Full access.
+       *
+       * Driver:
+       *   Can update if:
+       *   - driverId belongs to them
+       *   - assignedDriverId belongs to them
+       *   - driver is assigned to the ride's route
+       */
+
+      allow update: if isAuthenticated() && (
+        isAdmin()
+
+        ||
+
+        resource.data.get('driverId', null) ==
+          request.auth.uid
+
+        ||
+
+        resource.data.get('assignedDriverId', null) ==
+          request.auth.uid
+
+        ||
+
+        (
+          resource.data.get('routeId', null) != null
+          &&
+          isRouteAssignedDriver(
+            resource.data.get('routeId', '')
+          )
+        )
+      );
+
+
+      allow delete: if isAdmin();
     }
 
-    // Availability collection
-    match /availability/{availId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn(); 
+
+    // =========================================================
+    // AVAILABILITY
+    // =========================================================
+
+    match /availability/{availabilityId} {
+
+      allow read: if isAuthenticated();
+
+      /*
+       * Student/User can create their own availability.
+       */
+      allow create: if
+        isAdmin()
+        ||
+        (
+          isAuthenticated()
+          &&
+          isOwner(request.resource.data.userId)
+        );
+
+      /*
+       * Owner can update their availability.
+       *
+       * Admin can update.
+       *
+       * Driver can update availability related to their route.
+       */
+      allow update: if
+        isAdmin()
+
+        ||
+
+        (
+          isAuthenticated()
+          &&
+          isOwner(resource.data.userId)
+        )
+
+        ||
+
+        (
+          isDriver()
+          &&
+          isRouteAssignedDriver(
+            resource.data.get('routeId', '')
+          )
+        );
+
+      allow delete: if
+        isAdmin()
+        ||
+        (
+          isAuthenticated()
+          &&
+          isOwner(resource.data.userId)
+        );
     }
 
-    // Fee Payments
+
+    // =========================================================
+    // BOOKINGS
+    // =========================================================
+
+    match /bookings/{bookingId} {
+
+      allow read: if isAuthenticated() && (
+        isAdmin()
+        ||
+        isOwner(resource.data.studentId)
+        ||
+        (
+          isDriver()
+          &&
+          resource.data.get('routeId', null) != null
+          &&
+          isRouteAssignedDriver(
+            resource.data.get('routeId', '')
+          )
+        )
+      );
+
+      allow create: if
+        isStudent()
+        &&
+        isOwner(request.resource.data.studentId);
+
+      allow update: if
+        isAdmin()
+        ||
+        isOwner(resource.data.studentId);
+
+      allow delete: if isAdmin();
+    }
+
+
+    // =========================================================
+    // FEE PAYMENTS
+    // =========================================================
+
     match /feePayments/{paymentId} {
-      allow read: if isAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
-      allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
+
+      allow read: if isAuthenticated() && (
+        isAdmin()
+        ||
+        isOwner(resource.data.studentId)
+      );
+
+      allow create: if
+        isStudent()
+        &&
+        isOwner(request.resource.data.studentId);
+
+      allow update: if isAdmin();
+
+      allow delete: if isAdmin();
     }
 
-    // Challans
+
+    // =========================================================
+    // CHALLANS
+    // =========================================================
+
     match /challans/{challanId} {
-      allow read: if isAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
-      allow write: if isAdmin();
+
+      allow read: if isAuthenticated() && (
+        isAdmin()
+        ||
+        isOwner(resource.data.studentId)
+      );
+
+      allow create: if
+        isStudent()
+        &&
+        isOwner(request.resource.data.studentId);
+
+      allow update: if
+        isAdmin()
+        ||
+        (
+          isStudent()
+          &&
+          isOwner(resource.data.studentId)
+        );
+
+      allow delete: if isAdmin();
     }
 
-    // Live Locations
+
+    // =========================================================
+    // LIVE LOCATIONS
+    // =========================================================
+
     match /liveLocations/{locationId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn() && (isDriver() || isAdmin());
+
+      allow read: if isAuthenticated();
+
+      allow create: if
+        isAdmin()
+        ||
+        (
+          isDriver()
+          &&
+          request.resource.data.driverId ==
+            request.auth.uid
+        );
+
+      allow update: if
+        isAdmin()
+        ||
+        (
+          isDriver()
+          &&
+          (resource == null || !('driverId' in resource.data) || resource.data.driverId == request.auth.uid)
+          &&
+          (!('driverId' in request.resource.data) || request.resource.data.driverId == request.auth.uid)
+        );
+
+      allow delete: if
+        isAdmin()
+        ||
+        (
+          isDriver()
+          &&
+          resource.data.driverId ==
+            request.auth.uid
+        );
     }
 
-    // Reviews
+
+    // =========================================================
+    // REVIEWS
+    // =========================================================
+
     match /reviews/{reviewId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && isStudent();
-      allow update, delete: if isAdmin();
+
+      allow read: if isAuthenticated();
+
+      allow create: if
+        isStudent()
+        &&
+        isOwner(request.resource.data.studentId);
+
+      allow update: if isAdmin();
+
+      allow delete: if isAdmin();
     }
 
-    // Settings
+
+    // =========================================================
+    // SETTINGS
+    // =========================================================
+
     match /settings/{settingId} {
-      allow read: if true;
+
+      allow read: if isAuthenticated();
+
       allow write: if isAdmin();
     }
 
-    // Admin Notifications
+
+    // =========================================================
+    // ADMIN NOTIFICATIONS
+    // =========================================================
+
     match /adminNotifications/{notificationId} {
+
       allow read: if isAdmin();
-      allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
+
+      allow create: if isAdmin();
+
+      allow update: if isAdmin();
+
+      allow delete: if isAdmin();
     }
+
+
+    // =========================================================
+    // GENERAL / SYSTEM NOTIFICATIONS (REGISTRATIONS, ALERTS)
+    // =========================================================
+
+    match /notifications/{notificationId} {
+
+      // Naya user (Student/Driver) sign-up hotay waqt notification create kar sakay
+      allow create: if isAuthenticated();
+
+      // Admin read, update (mark as read), aur delete kar sakay
+      allow read, update, delete: if isAuthenticated();
+    }
+
+
+    // =========================================================
+    // EARLY RIDE SHARING
+    // =========================================================
+
+
+    // ---------------------------------------------------------
+    // STUDENT CREATES EARLY RIDE REQUEST
+    // ---------------------------------------------------------
+
+    function isValidEarlyRideRequestCreate() {
+
+      return isStudent()
+
+        && request.resource.data.route is string
+        && request.resource.data.route.size() > 0
+
+        && request.resource.data.routeId is string
+        && request.resource.data.routeId.size() > 0
+
+        && request.resource.data.studentsJoined is list
+        && request.resource.data.studentsJoined.size() == 1
+
+        && request.resource.data.studentsJoined[0].studentId ==
+          request.auth.uid
+
+        && request.resource.data.studentsJoined[0].name is string
+        && request.resource.data.studentsJoined[0].name.size() > 0
+
+        && request.resource.data.studentsJoined[0].gender in [
+          'male',
+          'female'
+        ]
+
+        && request.resource.data.status in [
+          'waiting',
+          'expired'
+        ]
+
+        && request.resource.data.acceptedDriverId == null
+
+        && request.resource.data.rideId == null
+
+        && request.resource.data.assignedDriverIds is list;
+    }
+
+
+    // ---------------------------------------------------------
+    // STUDENT UPDATES EARLY RIDE REQUEST
+    // ---------------------------------------------------------
+
+    function isStudentEarlyRideUpdate() {
+
+      return isStudent()
+
+        && resource.data.status == 'waiting'
+
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            'studentsJoined',
+            'boysCount',
+            'girlsCount',
+            'updatedAt',
+            'status'
+          ])
+
+        && request.resource.data.acceptedDriverId ==
+          resource.data.acceptedDriverId
+
+        && request.resource.data.rideId ==
+          resource.data.rideId
+
+        && request.resource.data.status in [
+          resource.data.status,
+          'cancelled'
+        ]
+
+        && (
+          request.resource.data.status != 'cancelled'
+          ||
+          request.resource.data.studentsJoined.size() == 0
+        );
+    }
+
+
+    // ---------------------------------------------------------
+    // DRIVER UPDATES / ACCEPTS EARLY RIDE REQUEST
+    // ---------------------------------------------------------
+
+    function isDriverEarlyRideUpdate() {
+
+      return isDriver()
+
+        // Request must still be waiting
+        && resource.data.status == 'waiting'
+
+        // Driver must actually be assigned to the request route
+        && isRouteAssignedDriver(
+          resource.data.routeId
+        )
+
+        // Driver must be present in updated assignment list
+        && request.auth.uid in
+          request.resource.data.assignedDriverIds
+
+        // Only Early Ride fields can be modified
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            'status',
+            'acceptedDriverId',
+            'vehicle',
+            'rideId',
+            'rejectedBy',
+            'assignedDriverIds',
+            'updatedAt'
+          ])
+
+        && (
+          /*
+           * Driver can make a non-final update while waiting.
+           */
+          request.resource.data.status ==
+            resource.data.status
+
+          ||
+
+          /*
+           * Driver accepts the Early Ride.
+           */
+          (
+            request.resource.data.status == 'accepted'
+
+            && request.resource.data.acceptedDriverId ==
+              request.auth.uid
+
+            && request.resource.data.rideId != null
+          )
+        );
+    }
+
+
+    // ---------------------------------------------------------
+    // SECURE EARLY RIDE -> RIDE CREATION
+    // ---------------------------------------------------------
+
+    function isValidEarlyRideSharingRideCreate(rideId) {
+
+      return isAuthenticated()
+
+        /*
+         * Ride must explicitly identify Early Ride Sharing.
+         */
+        && request.resource.data.source ==
+          'earlyRideSharing'
+
+        /*
+         * Early Ride Request ID must exist.
+         */
+        && request.resource.data.earlyRideRequestId is string
+
+        && request.resource.data.earlyRideRequestId.size() > 0
+
+        /*
+         * Request must exist AFTER the transaction.
+         */
+        && existsAfter(
+          /databases/$(database)/documents/earlyRideRequests/$(request.resource.data.earlyRideRequestId)
+        )
+
+        /*
+         * Request must be accepted AFTER the transaction.
+         */
+        && getAfter(
+          /databases/$(database)/documents/earlyRideRequests/$(request.resource.data.earlyRideRequestId)
+        ).data.status == 'accepted'
+
+        /*
+         * The accepting driver must be the authenticated driver.
+         */
+        && getAfter(
+          /databases/$(database)/documents/earlyRideRequests/$(request.resource.data.earlyRideRequestId)
+        ).data.acceptedDriverId ==
+          request.auth.uid
+
+        /*
+         * IMPORTANT:
+         *
+         * The Early Ride Request must point to the exact
+         * ride document currently being created.
+         *
+         * This prevents reuse of an old accepted request.
+         */
+        && getAfter(
+          /databases/$(database)/documents/earlyRideRequests/$(request.resource.data.earlyRideRequestId)
+        ).data.rideId ==
+          rideId
+
+        /*
+         * Ride must belong to the authenticated driver.
+         */
+        && request.resource.data.driverId ==
+          request.auth.uid
+
+        /*
+         * Route validation.
+         */
+        && request.resource.data.routeId is string
+        && request.resource.data.routeId.size() > 0
+
+        && request.resource.data.routeName is string
+        && request.resource.data.routeName.size() > 0
+
+        /*
+         * Passenger validation.
+         */
+        && request.resource.data.passengerIds is list
+        && request.resource.data.passengerIds.size() > 0
+
+        /*
+         * Seat validation.
+         */
+        && request.resource.data.totalSeats > 0
+
+        && request.resource.data.availableSeats ==
+          request.resource.data.totalSeats
+
+        /*
+         * Valid initial ride status.
+         */
+        && request.resource.data.status in [
+          'scheduled',
+          'active',
+          'completed'
+        ];
+    }
+
+
+    // ---------------------------------------------------------
+    // EARLY RIDE REQUESTS COLLECTION
+    // ---------------------------------------------------------
+
+    match /earlyRideRequests/{requestId} {
+
+      allow read: if isAuthenticated();
+
+      /*
+       * Student creates request.
+       */
+      allow create:
+        if isValidEarlyRideRequestCreate();
+
+      /*
+       * Student can update their request OR
+       * authorized driver can accept/update it.
+       */
+      allow update:
+        if isStudentEarlyRideUpdate()
+        ||
+        isDriverEarlyRideUpdate();
+
+      allow delete: if isAdmin();
+    }
+
+
+    // =========================================================
+    // DEFAULT DENY
+    // =========================================================
+    //
+    // Any collection not explicitly listed above is denied.
+    //
   }
 }

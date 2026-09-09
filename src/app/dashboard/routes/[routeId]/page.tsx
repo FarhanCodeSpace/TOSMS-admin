@@ -32,10 +32,10 @@ import { Route, User as UserType, Availability } from "@/types";
 import { formatTimeTo12Hour } from "@/utils/formatters";
 import Badge from "@/components/ui/Badge";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
-import AssignDriverModal from "@/components/routes/AssignDriverModal";
 import EmptyState from "@/components/ui/EmptyState";
 import SkeletonLoader from "@/components/ui/SkeletonLoader";
 import { deleteRoute } from "@/utils/firestoreHelpers";
+import { getRouteAssignedDriverIds } from "@/utils/routeAssignments";
 
 const RouteDetailMap = dynamic(
   () => import("@/components/routes/RouteDetailMap"),
@@ -55,14 +55,13 @@ export default function RouteDetailPage() {
   const routeId = params?.routeId as string;
 
   const [route, setRoute] = useState<Route | null>(null);
-  const [driver, setDriver] = useState<UserType | null>(null);
+  const [drivers, setDrivers] = useState<UserType[]>([]);
   const [students, setStudents] = useState<UserType[]>([]);
   const [todayAvailability, setTodayAvailability] = useState<Availability[]>(
     [],
   );
   const [isLoading, setIsLoading] = useState(true);
 
-  const [assignDriverModalOpen, setAssignDriverModalOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -80,36 +79,46 @@ export default function RouteDetailPage() {
           } as Route;
           setRoute(routeData);
 
-          // Fetch assigned driver
-          if (routeData.assignedDriverId) {
-            const driverSnap = await getDoc(
-              doc(db, COLLECTIONS.USERS, routeData.assignedDriverId),
+          const assignedDriverIds = getRouteAssignedDriverIds(routeData);
+          if (assignedDriverIds.length > 0) {
+            const driverSnaps = await Promise.all(
+              assignedDriverIds.map((driverId) => getDoc(doc(db, COLLECTIONS.USERS, driverId))),
             );
-            if (driverSnap.exists()) {
-              setDriver({
-                ...driverSnap.data(),
-                uid: driverSnap.id,
-              } as UserType);
-            } else {
-              setDriver(null);
-            }
+            setDrivers(
+              driverSnaps
+                .filter((driverSnap) => driverSnap.exists())
+                .map((driverSnap) => ({
+                  ...(driverSnap.data() as UserType),
+                  uid: driverSnap.id,
+                })),
+            );
           } else {
-            setDriver(null);
+            setDrivers([]);
           }
 
-          // Fetch assigned students
-          const studentSnaps = await getDocs(
-            query(
-              collection(db, COLLECTIONS.USERS),
-              where("routeId", "==", routeId),
-              where("role", "==", "student"),
-            ),
-          );
-          const studentsList = studentSnaps.docs.map((d) => ({
-            ...d.data(),
-            uid: d.id,
-          })) as UserType[];
-          setStudents(studentsList);
+          // Fetch assigned students from routeData.studentIds
+          const studentIds = routeData.studentIds || [];
+          if (studentIds.length > 0) {
+            const batches = [];
+            for (let i = 0; i < studentIds.length; i += 30) {
+              const batchIds = studentIds.slice(i, i + 30);
+              batches.push(
+                getDocs(
+                  query(
+                    collection(db, COLLECTIONS.USERS),
+                    where("__name__", "in", batchIds)
+                  )
+                )
+              );
+            }
+            const snaps = await Promise.all(batches);
+            const studentsList = snaps
+              .flatMap((s) => s.docs.map((d) => ({ ...d.data(), uid: d.id })))
+              .filter((u: any) => u.role === "student") as UserType[];
+            setStudents(studentsList);
+          } else {
+            setStudents([]);
+          }
         }
         setIsLoading(false);
       },
@@ -233,8 +242,13 @@ export default function RouteDetailPage() {
             <span className="text-sm text-slate-600">Schedule</span>
           </div>
           <p className="text-lg font-semibold text-slate-900">
-            {formatTimeTo12Hour(route.departureTime)} -{" "}
-            {formatTimeTo12Hour(route.returnTime)}
+            {route.departureTime && route.returnTime
+              ? `${formatTimeTo12Hour(route.departureTime)} - ${formatTimeTo12Hour(route.returnTime)}`
+              : route.departureTime
+                ? formatTimeTo12Hour(route.departureTime)
+                : route.returnTime
+                  ? formatTimeTo12Hour(route.returnTime)
+                  : ""}
           </p>
         </div>
 
@@ -258,15 +272,7 @@ export default function RouteDetailPage() {
           </p>
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Zap size={18} className="text-slate-600" />
-            <span className="text-sm text-slate-600">Fee</span>
-          </div>
-          <p className="text-lg font-semibold text-slate-900">
-            PKR {route.feeAmount.toLocaleString("en-PK")}
-          </p>
-        </div>
+
       </div>
 
       {/* Map */}
@@ -279,32 +285,30 @@ export default function RouteDetailPage() {
       <div className="rounded-lg border border-slate-200 bg-white p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-slate-900">
-            Assigned Driver
+            Assigned Drivers
           </h2>
-          <button
-            onClick={() => setAssignDriverModalOpen(true)}
-            className="px-3 py-1 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-          >
-            {route.assignedDriverId ? "Change Driver" : "Assign Driver"}
-          </button>
         </div>
 
-        {driver ? (
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-semibold">
-              {(driver.fullName || "").charAt(0).toUpperCase()}
-            </div>
-            <div>
-              <p className="font-semibold text-slate-900">{driver.fullName}</p>
-              <p className="text-sm text-slate-600">{driver.phone}</p>
-              <p className="text-xs text-slate-500">
-                Vehicle: {driver.vehicleType}
-              </p>
-            </div>
+        {drivers.length > 0 ? (
+          <div className="grid gap-3">
+            {drivers.map((driver) => (
+              <div key={driver.uid} className="flex items-center gap-4 rounded-xl border border-slate-200 p-4">
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-semibold">
+                  {(driver.fullName || "").charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-900">{driver.fullName}</p>
+                  <p className="text-sm text-slate-600">{driver.phone}</p>
+                  <p className="text-xs text-slate-500">
+                    Vehicle: {driver.vehicleType || "N/A"}
+                  </p>
+                </div>
+              </div>
+            ))}
           </div>
         ) : (
           <div className="py-6 text-center text-slate-600">
-            <p>No driver assigned</p>
+            <p>No drivers assigned</p>
           </div>
         )}
       </div>
@@ -370,7 +374,7 @@ export default function RouteDetailPage() {
                       Pickup Stop
                     </p>
                     <p className="text-slate-900">
-                      {student.pickupStop || "-"}
+                      {(student.routeStops && student.routeStops[routeId]?.pickupStop) || student.pickupStop || "-"}
                     </p>
                   </div>
                   <div>
@@ -431,13 +435,6 @@ export default function RouteDetailPage() {
       </div>
 
       {/* Modals */}
-      <AssignDriverModal
-        open={assignDriverModalOpen}
-        onClose={() => setAssignDriverModalOpen(false)}
-        route={route}
-        initialDriverId={route.assignedDriverId}
-      />
-
       <ConfirmDialog
         open={deleteConfirmOpen}
         title="Delete Route?"

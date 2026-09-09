@@ -15,7 +15,15 @@ import {
   reauthenticateWithCredential,
   updatePassword,
 } from "firebase/auth";
-import { Building2, Info, Lock, Save } from "lucide-react";
+import {
+  Building2,
+  Info,
+  Lock,
+  Save,
+  Users,
+  CreditCard,
+  Loader2,
+} from "lucide-react";
 import toast from "react-hot-toast";
 
 import ErrorState from "@/components/ui/ErrorState";
@@ -41,6 +49,7 @@ const defaultCompanyForm: CompanySettings = {
   easypaisaAccount: "",
   jazzcashAccount: "",
   feeDueDate: "",
+  monthlyFee: 0,
 };
 
 type PasswordForm = {
@@ -59,6 +68,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingCompany, setSavingCompany] = useState(false);
+  const [savingFees, setSavingFees] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
   const [companyForm, setCompanyForm] =
@@ -116,6 +126,7 @@ export default function SettingsPage() {
           easypaisaAccount: data.easypaisaAccount || "",
           jazzcashAccount: data.jazzcashAccount || "",
           feeDueDate: data.feeDueDate || "",
+          monthlyFee: data.monthlyFee || 0,
         });
       }
 
@@ -146,24 +157,34 @@ export default function SettingsPage() {
     void loadSettingsData();
   }, []);
 
-  const validateCompanyForm = () => {
+  const validateCompanyForm = (type: 'company' | 'fees') => {
     const nextErrors: Record<string, string> = {};
 
-    if (!companyForm.companyName.trim())
-      nextErrors.companyName = "Company name is required";
-    if (!companyForm.bankName.trim())
-      nextErrors.bankName = "Bank name is required";
-    if (!companyForm.bankAccountTitle.trim()) {
-      nextErrors.bankAccountTitle = "Account title is required";
+    if (type === 'company') {
+      if (!companyForm.companyName.trim())
+        nextErrors.companyName = "Company name is required";
+      if (!companyForm.bankName.trim())
+        nextErrors.bankName = "Bank name is required";
+      if (!companyForm.bankAccountTitle.trim()) {
+        nextErrors.bankAccountTitle = "Account title is required";
+      }
+      if (!companyForm.bankAccountNumber.trim()) {
+        nextErrors.bankAccountNumber = "Account number is required";
+      }
+    } else if (type === 'fees') {
+      if (!companyForm.feeDueDate.trim())
+        nextErrors.feeDueDate = "Fee due date is required";
+      if (companyForm.monthlyFee === undefined || companyForm.monthlyFee <= 0)
+        nextErrors.monthlyFee = "Valid monthly fee is required";
     }
-    if (!companyForm.bankAccountNumber.trim()) {
-      nextErrors.bankAccountNumber = "Account number is required";
-    }
-    if (!companyForm.feeDueDate.trim())
-      nextErrors.feeDueDate = "Fee due date is required";
 
     setCompanyErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+    
+    if (Object.keys(nextErrors).length > 0) {
+      toast.error("Please fill all required fields correctly.");
+      return false;
+    }
+    return true;
   };
 
   const validatePasswordForm = () => {
@@ -189,20 +210,43 @@ export default function SettingsPage() {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const saveCompanyInfo = async () => {
-    if (!validateCompanyForm()) return;
+  const saveCompanyInfo = async (type: 'company' | 'fees') => {
+    if (!validateCompanyForm(type)) return;
 
-    setSavingCompany(true);
+    if (type === 'company') setSavingCompany(true);
+    else setSavingFees(true);
+
+    const payload = type === 'company' 
+      ? {
+          companyName: companyForm.companyName,
+          bankName: companyForm.bankName,
+          bankAccountTitle: companyForm.bankAccountTitle,
+          bankAccountNumber: companyForm.bankAccountNumber,
+          bankBranchCode: companyForm.bankBranchCode,
+          bankIBAN: companyForm.bankIBAN,
+          easypaisaAccount: companyForm.easypaisaAccount,
+          jazzcashAccount: companyForm.jazzcashAccount,
+        }
+      : {
+          feeDueDate: companyForm.feeDueDate,
+          monthlyFee: companyForm.monthlyFee,
+        };
+
     try {
-      await setDoc(doc(db, COLLECTIONS.SETTINGS, "companyInfo"), companyForm, {
+      await setDoc(doc(db, COLLECTIONS.SETTINGS, "companyInfo"), payload, {
         merge: true,
       });
-      toast.success("Company information updated");
+      if (type === 'company') {
+        toast.success("Company information saved successfully!");
+      } else {
+        toast.success("Fee settings updated successfully!");
+      }
     } catch (saveError) {
-      console.error("Failed saving company info:", saveError);
-      toast.error("Failed to save company information");
+      console.error("Failed saving info:", saveError);
+      toast.error("Failed to save information");
     } finally {
-      setSavingCompany(false);
+      if (type === 'company') setSavingCompany(false);
+      else setSavingFees(false);
     }
   };
 
@@ -287,7 +331,6 @@ export default function SettingsPage() {
               { key: "bankIBAN", label: "IBAN" },
               { key: "easypaisaAccount", label: "EasyPaisa Account Number" },
               { key: "jazzcashAccount", label: "JazzCash Account Number" },
-              { key: "feeDueDate", label: "Fee Due Date" },
             ].map((field) => (
               <label
                 key={field.key}
@@ -295,12 +338,15 @@ export default function SettingsPage() {
               >
                 {field.label}
                 <input
-                  type="text"
-                  value={companyForm[field.key as keyof CompanySettings]}
+                  type={field.key === "monthlyFee" ? "number" : "text"}
+                  value={companyForm[field.key as keyof CompanySettings] || ""}
                   onChange={(event) => {
+                    const value = field.key === "monthlyFee" 
+                      ? Number(event.target.value) 
+                      : event.target.value;
                     setCompanyForm((prev) => ({
                       ...prev,
-                      [field.key]: event.target.value,
+                      [field.key]: value,
                     }));
                   }}
                   className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-400 focus:outline-none"
@@ -319,13 +365,73 @@ export default function SettingsPage() {
           <button
             type="button"
             onClick={() => {
-              void saveCompanyInfo();
+              void saveCompanyInfo('company');
             }}
             disabled={savingCompany || loading}
             className="inline-flex items-center gap-2 rounded-full bg-[#1A3C5E] px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <Save className="h-4 w-4" />
+            {savingCompany ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {savingCompany ? "Saving..." : "Save Company Info"}
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm md:p-8">
+        <div className="mb-5 flex items-center gap-2">
+          <CreditCard className="h-5 w-5 text-[var(--text-secondary)]" />
+          <h2 className="text-lg font-semibold text-[var(--text)]">
+            Fee Settings
+          </h2>
+        </div>
+
+        {loading ? (
+          <SkeletonLoader variant="line" rows={2} />
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {[
+              { key: "feeDueDate", label: "Fee Due Date" },
+              { key: "monthlyFee", label: "Global Monthly Fee (PKR)" },
+            ].map((field) => (
+              <label
+                key={field.key}
+                className="text-sm font-medium text-slate-700"
+              >
+                {field.label}
+                <input
+                  type={field.key === "monthlyFee" ? "number" : "text"}
+                  value={companyForm[field.key as keyof CompanySettings] || ""}
+                  onChange={(event) => {
+                    const value = field.key === "monthlyFee" 
+                      ? Number(event.target.value) 
+                      : event.target.value;
+                    setCompanyForm((prev) => ({
+                      ...prev,
+                      [field.key]: value,
+                    }));
+                  }}
+                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-400 focus:outline-none"
+                />
+                {companyErrors[field.key] ? (
+                  <p className="mt-1 text-xs text-rose-600">
+                    {companyErrors[field.key]}
+                  </p>
+                ) : null}
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-5">
+          <button
+            type="button"
+            onClick={() => {
+              void saveCompanyInfo('fees');
+            }}
+            disabled={savingFees || loading}
+            className="inline-flex items-center gap-2 rounded-full bg-[#1A3C5E] px-5 py-2 text-sm font-semibold text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {savingFees ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {savingFees ? "Saving..." : "Save Settings"}
           </button>
         </div>
       </div>

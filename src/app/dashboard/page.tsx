@@ -20,7 +20,14 @@ import {
   limit,
 } from "firebase/firestore";
 import { addDays, format, subMonths } from "date-fns";
-import { MapPin, Users, GraduationCap, Bus, Calendar } from "lucide-react";
+import {
+  MapPin,
+  Users,
+  GraduationCap,
+  Bus,
+  Calendar,
+  Clock,
+} from "lucide-react";
 import toast from "react-hot-toast";
 
 import { db } from "@/lib/firebase";
@@ -38,6 +45,8 @@ import MetricTile from "@/components/ui/MetricTile";
 import ActivityFeed from "@/components/ui/ActivityFeed";
 import SkeletonLoader from "@/components/ui/SkeletonLoader";
 import { cn } from "@/lib/utils";
+import { getRouteAssignedDriverIds, getRoutePrimaryDriverId } from "@/utils/routeAssignments";
+import { buildAvailabilityMap, getStudentAvailabilityStats } from "@/utils/availabilityHelpers";
 
 const today = new Date();
 const todayString = format(today, "yyyy-MM-dd");
@@ -50,6 +59,7 @@ type RouteRecord = {
   name?: string;
   isActive?: boolean;
   assignedDriverId?: string;
+  assignedDriverIds?: string[];
   studentIds?: string[];
 };
 
@@ -74,12 +84,21 @@ type FeePaymentRecord = {
 type AvailabilitySummary = {
   routeId: string;
   name: string;
-  driverStatus: "available" | "unavailable" | "pending" | "unassigned";
-  driverLabel: string;
+  drivers: {
+    id: string;
+    name: string;
+    status: "available" | "unavailable" | "pending" | "unassigned";
+    label: string;
+  }[];
   availableCount: number;
   notAvailableCount: number;
   noResponseCount: number;
   responseRate: number;
+};
+
+type EarlyRideDashboardSnapshot = {
+  createdAt?: { toDate?: () => Date } | Date;
+  status?: string;
 };
 
 function formatPKR(value: number) {
@@ -129,12 +148,15 @@ export default function DashboardPage() {
   const [availabilityRecords, setAvailabilityRecords] = useState<
     AvailabilityRecord[]
   >([]);
+  const [allDrivers, setAllDrivers] = useState<{uid: string; fullName?: string}[]>([]);
   const [feeTotalCollected, setFeeTotalCollected] = useState(0);
   const [feePendingCount, setFeePendingCount] = useState(0);
   const [feeVerifiedCount, setFeeVerifiedCount] = useState(0);
   const [feeChartData, setFeeChartData] = useState<
     { month: string; total: number }[]
   >([]);
+  const [earlyRideTodayCount, setEarlyRideTodayCount] = useState(0);
+  const [earlyRideWaitingCount, setEarlyRideWaitingCount] = useState(0);
   const [isFeeCardLoading, setIsFeeCardLoading] = useState(true);
   const [isAvailabilityLoading, setIsAvailabilityLoading] = useState(true);
   const [hasLoadedRoutes, setHasLoadedRoutes] = useState(false);
@@ -226,19 +248,24 @@ export default function DashboardPage() {
     const unsubscribe = onSnapshot(
       driversQuery,
       (snapshot) => {
-        const drivers = snapshot.docs.map((driverDoc) =>
-          driverDoc.data(),
-        ) as Array<{
+        const driversData = snapshot.docs.map((driverDoc) => ({
+          ...driverDoc.data(),
+          uid: driverDoc.id,
+        })) as Array<{
+          uid: string;
+          fullName?: string;
           status?: string;
           approved?: boolean;
           profileComplete?: boolean;
         }>;
 
-        const activeDrivers = drivers.filter(
-          (driver) => driver.status === "active",
+        setAllDrivers(driversData);
+
+        const activeDrivers = driversData.filter(
+          (driver) => driver.approved === true && driver.status !== "suspended",
         ).length;
 
-        const pendingDrivers = drivers.filter(
+        const pendingDrivers = driversData.filter(
           (driver) =>
             driver.approved === false && driver.profileComplete === true,
         ).length;
@@ -533,66 +560,117 @@ export default function DashboardPage() {
     return () => unsubRecent();
   }, [authLoading, currentUser]);
 
+  useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!currentUser) {
+      setEarlyRideTodayCount(0);
+      setEarlyRideWaitingCount(0);
+      return;
+    }
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const unsubEarlyRides = onSnapshot(
+      query(
+        collection(db, COLLECTIONS.EARLY_RIDE_REQUESTS),
+        orderBy("createdAt", "desc"),
+      ),
+      (snapshot) => {
+        let todayCount = 0;
+        let waitingCount = 0;
+
+        snapshot.docs.forEach((doc) => {
+          const data = doc.data() as EarlyRideDashboardSnapshot;
+          const createdAtRaw = data.createdAt as any;
+          const createdAt = createdAtRaw?.toDate
+            ? createdAtRaw.toDate()
+            : createdAtRaw instanceof Date
+              ? createdAtRaw
+              : null;
+
+          if (data.status === "waiting") {
+            waitingCount += 1;
+          }
+
+          if (createdAt && createdAt >= todayStart) {
+            todayCount += 1;
+          }
+        });
+
+        setEarlyRideTodayCount(todayCount);
+        setEarlyRideWaitingCount(waitingCount);
+      },
+      (error) => {
+        console.error("Dashboard early ride subscription failed:", error);
+      },
+    );
+
+    return () => unsubEarlyRides();
+  }, [authLoading, currentUser]);
+
   const availabilitySummary = useMemo<AvailabilitySummary[]>(() => {
+    const availabilityMap = buildAvailabilityMap(availabilityRecords);
+
     return routeRecords.map((route) => {
-      const studentsInRoute = route.studentIds?.length ?? 0;
-      const studentResponses = availabilityRecords.filter(
-        (record) =>
-          record.routeId === route.routeId && record.role === "student",
-      );
+      const studentIds = route.studentIds || [];
+      const stats = getStudentAvailabilityStats(studentIds, route.routeId, availabilityMap);
 
-      const availableCount = studentResponses.filter(
-        (record) => record.isAvailable,
-      ).length;
-      const notAvailableCount = studentResponses.filter(
-        (record) => !record.isAvailable,
-      ).length;
-      const respondedCount = availableCount + notAvailableCount;
-      const noResponseCount = Math.max(studentsInRoute - respondedCount, 0);
+      const assignedDriverIds = getRouteAssignedDriverIds(route as never);
 
-      const driverAvailability = availabilityRecords.find(
-        (record) =>
-          record.role === "driver" &&
-          record.routeId === route.routeId &&
-          route.assignedDriverId &&
-          record.userId === route.assignedDriverId,
-      );
-
-      const driverStatus = route.assignedDriverId
-        ? driverAvailability
-          ? driverAvailability.isAvailable
-            ? "available"
-            : "unavailable"
-          : "pending"
-        : "unassigned";
-
-      const driverLabel = route.assignedDriverId
-        ? driverAvailability
-          ? driverAvailability.isAvailable
-            ? "Driver available"
-            : "Driver unavailable"
-          : "Driver response pending"
-        : "No driver assigned";
+      let driversList: AvailabilitySummary["drivers"] = [];
+      if (assignedDriverIds.length > 0) {
+        driversList = assignedDriverIds.map((driverId) => {
+          const driverUser = allDrivers.find((d) => d.uid === driverId);
+          const driverName = driverUser?.fullName || "Driver";
+          const driverRecord = 
+            availabilityMap.get(`${driverId}_${route.routeId}_driver`) || 
+            availabilityMap.get(`${driverId}_driver`);
+          
+          let status: "available" | "unavailable" | "pending" | "unassigned" = "pending";
+          let label = `${driverName} response pending`;
+          
+          if (driverRecord) {
+            if (driverRecord.isAvailable) {
+               status = "available";
+               label = `${driverName} available`;
+            } else {
+               status = "unavailable";
+               label = `${driverName} unavailable`;
+            }
+          }
+          
+          return { id: driverId, name: driverName, status, label };
+        });
+      } else {
+        driversList = [{
+           id: "unassigned",
+           name: "No driver",
+           status: "unassigned",
+           label: "No driver assigned",
+        }];
+      }
 
       return {
         routeId: route.routeId,
         name: route.routeName ?? route.name ?? "Unnamed Route",
-        driverStatus,
-        driverLabel,
-        availableCount,
-        notAvailableCount,
-        noResponseCount,
+        drivers: driversList,
+        availableCount: stats.availableCount,
+        notAvailableCount: stats.notAvailableCount,
+        noResponseCount: stats.noResponseCount,
         responseRate:
-          studentsInRoute > 0
-            ? Math.round((respondedCount / studentsInRoute) * 100)
+          stats.totalStudents > 0
+            ? Math.round((stats.respondedCount / stats.totalStudents) * 100)
             : 0,
       };
     });
-  }, [availabilityRecords, routeRecords]);
+  }, [availabilityRecords, routeRecords, allDrivers]);
 
   const activeRoutesWithAssignedDriver = useMemo(
-    () =>
-      routeRecords.filter((route) => Boolean(route.assignedDriverId)).length,
+    () => routeRecords.filter((route) => getRouteAssignedDriverIds(route as never).length > 0).length,
     [routeRecords],
   );
 
@@ -604,25 +682,25 @@ export default function DashboardPage() {
   const driversIndicatorPercent =
     activeDriversCount + pendingDriversCount > 0
       ? Math.round(
-          (activeDriversCount / (activeDriversCount + pendingDriversCount)) *
-            100,
-        )
+        (activeDriversCount / (activeDriversCount + pendingDriversCount)) *
+        100,
+      )
       : 0;
 
   const studentsIndicatorPercent =
     totalStudentsCount > 0
       ? Math.round(
-          ((totalStudentsCount - unassignedStudentsCount) /
-            totalStudentsCount) *
-            100,
-        )
+        ((totalStudentsCount - unassignedStudentsCount) /
+          totalStudentsCount) *
+        100,
+      )
       : 0;
 
   const ridesIndicatorPercent =
     activeRidesCount + scheduledRidesCount > 0
       ? Math.round(
-          (activeRidesCount / (activeRidesCount + scheduledRidesCount)) * 100,
-        )
+        (activeRidesCount / (activeRidesCount + scheduledRidesCount)) * 100,
+      )
       : 0;
 
   return (
@@ -685,6 +763,47 @@ export default function DashboardPage() {
           />
         </section>
 
+        <section className="animate-slide-up" style={{ animationDelay: "50ms" }}>
+          <Link
+            href="/dashboard/early-ride-sharing"
+            className="block rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                  Early Ride Sharing
+                </p>
+                <h2 className="mt-1 text-lg font-semibold text-[var(--text)]">
+                  Requests today and waiting queue
+                </h2>
+              </div>
+              <div className="flex items-center gap-2 rounded-full bg-[var(--primary-light)] px-3 py-1.5 text-sm font-semibold text-[var(--primary)]">
+                <Clock className="h-4 w-4" />
+                Live monitor
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-secondary)] px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                  Early Ride Requests Today
+                </p>
+                <p className="mt-2 text-3xl font-bold text-[var(--text)]">
+                  {earlyRideTodayCount}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-secondary)] px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                  Currently Waiting
+                </p>
+                <p className="mt-2 text-3xl font-bold text-[var(--warning)]">
+                  {earlyRideWaitingCount}
+                </p>
+              </div>
+            </div>
+          </Link>
+        </section>
+
         {/* Availability Overview */}
         <div className="animate-slide-up" style={{ animationDelay: "100ms" }}>
           <Card variant="elevated" className="w-full">
@@ -704,22 +823,20 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setAvailabilityView("today")}
-                    className={`rounded-full px-4 py-2 text-xs font-semibold transition-all ${
-                      availabilityView === "today"
+                    className={`rounded-full px-4 py-2 text-xs font-semibold transition-all ${availabilityView === "today"
                         ? "bg-[var(--primary)] text-white shadow-sm"
                         : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                    }`}
+                      }`}
                   >
                     Today
                   </button>
                   <button
                     type="button"
                     onClick={() => setAvailabilityView("tomorrow")}
-                    className={`rounded-full px-4 py-2 text-xs font-semibold transition-all ${
-                      availabilityView === "tomorrow"
+                    className={`rounded-full px-4 py-2 text-xs font-semibold transition-all ${availabilityView === "tomorrow"
                         ? "bg-[var(--primary)] text-white shadow-sm"
                         : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                    }`}
+                      }`}
                   >
                     Tomorrow
                   </button>
@@ -822,9 +939,13 @@ export default function DashboardPage() {
                           {route.name}
                         </td>
                         <td className="px-5 py-4">
-                          <Badge status={route.driverStatus}>
-                            {route.driverLabel}
-                          </Badge>
+                          <div className="flex flex-col gap-2 items-start">
+                            {route.drivers.map((driver) => (
+                              <Badge key={driver.id} status={driver.status}>
+                                {driver.label}
+                              </Badge>
+                            ))}
+                          </div>
                         </td>
                         <td className="px-5 py-4 text-center text-sm font-semibold text-[var(--success)]">
                           {route.availableCount}

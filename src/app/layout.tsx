@@ -21,6 +21,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             {children}
             <Toaster
               position="bottom-right"
+              containerStyle={{ zIndex: 99999 }}
               toastOptions={{
                 style: {
                   background: "var(--surface)",
