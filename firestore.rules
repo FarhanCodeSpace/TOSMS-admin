@@ -353,10 +353,15 @@ service cloud.firestore {
         isOwner(resource.data.studentId)
       );
 
+      // Admin has been granted create access
       allow create: if
-        isStudent()
-        &&
-        isOwner(request.resource.data.studentId);
+        isAdmin()
+        ||
+        (
+          isStudent()
+          &&
+          isOwner(request.resource.data.studentId)
+        );
 
       allow update: if isAdmin();
 
@@ -376,10 +381,15 @@ service cloud.firestore {
         isOwner(resource.data.studentId)
       );
 
+      // Admin has been granted create access
       allow create: if
-        isStudent()
-        &&
-        isOwner(request.resource.data.studentId);
+        isAdmin()
+        ||
+        (
+          isStudent()
+          &&
+          isOwner(request.resource.data.studentId)
+        );
 
       allow update: if
         isAdmin()
@@ -760,6 +770,15 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+
+    // =========================================================
+    // EXEMPTIONS
+    // =========================================================
+    
+    match /exemptions/{exemptionId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
 
     // =========================================================
     // DEFAULT DENY

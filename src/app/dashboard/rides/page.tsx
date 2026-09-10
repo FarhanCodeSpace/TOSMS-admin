@@ -14,7 +14,7 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { AlertTriangle, Clock3, Plus, Rows4, Download, Zap } from "lucide-react";
+import { AlertTriangle, Clock3, Plus, Rows4, Download, Zap, Users, Bus } from "lucide-react";
 import toast from "react-hot-toast";
 
 import BulkCreateModal from "@/components/rides/BulkCreateModal";
@@ -45,6 +45,7 @@ type RideWithMeta = Ride & {
   completedAt?: Timestamp;
   cancelledAt?: Timestamp;
   scheduledAt?: Timestamp;
+  isEarlyRide?: boolean;
 };
 
 type AvailableStudentEntry = {
@@ -53,7 +54,15 @@ type AvailableStudentEntry = {
   pickupStop?: string;
 };
 
-function RideStatusBadge({ status }: { status: Ride["status"] }) {
+function RideStatusBadge({ status }: { status: Ride["status"] | "waiting" | "accepted" | "expired" }) {
+  if (status === "waiting") {
+    return (
+      <span className="inline-flex rounded-full bg-yellow-100 px-3 py-1 text-xs font-semibold text-yellow-800">
+        Waiting
+      </span>
+    );
+  }
+
   if (status === "scheduled") {
     return (
       <span className="inline-flex rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700">
@@ -208,28 +217,47 @@ function RideDetailModal({
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="flex justify-between items-center px-1">
-            <div className="flex flex-col items-center">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Available</span>
-              <span className="text-sm font-bold text-emerald-600">
-                {(ride as any).availabilityStats?.available || availableStudents.length || 0}
-              </span>
+        {ride.isEarlyRide ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
+              <Users className="h-5 w-5 text-emerald-500" />
+              Students: {(ride as any).boardedCount || availableStudents.length} (👦 {(ride as any).boysCount || 0} 👧 {(ride as any).girlsCount || 0})
             </div>
-            <div className="flex flex-col items-center">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">Unavailable</span>
-              <span className="text-sm font-bold text-red-600">
-                {(ride as any).availabilityStats?.notAvailable || 0}
-              </span>
-            </div>
-            <div className="flex flex-col items-center">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">No Response</span>
-              <span className="text-sm font-bold text-slate-600">
-                {(ride as any).availabilityStats?.noResponse || 0}
-              </span>
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
+              <Bus className="h-5 w-5 text-blue-500" />
+              Vehicle: {(ride as any).vehicle?.name || (ride as any).vehicleType || "TBD"} - {(ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || "TBD"}
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex justify-between items-center px-1">
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Available</span>
+                  <span className="text-sm font-bold text-emerald-600">
+                    {(ride as any).availabilityStats?.available || availableStudents.length || 0}
+                  </span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">Unavailable</span>
+                  <span className="text-sm font-bold text-red-600">
+                    {(ride as any).availabilityStats?.notAvailable || 0}
+                  </span>
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">No Response</span>
+                  <span className="text-sm font-bold text-slate-600">
+                    {(ride as any).availabilityStats?.noResponse || 0}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
+              <Bus className="h-5 w-5 text-blue-500" />
+              Vehicle: {(ride as any).vehicleType || "TBD"} - {(ride as any).vehiclePlate || "TBD"}
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -347,7 +375,7 @@ export default function RidesPage() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
-      query(collection(db, COLLECTIONS.USERS), where("role", "==", "student")),
+      collection(db, COLLECTIONS.USERS),
       (snapshot) => {
         const map = new Map<string, User>();
         snapshot.docs.forEach((userDoc) => {
@@ -365,27 +393,96 @@ export default function RidesPage() {
 
   useEffect(() => {
     setIsTodayRidesLoading(true);
-    const unsubscribe = onSnapshot(
-      query(
-        collection(db, COLLECTIONS.RIDES),
-        where("date", "==", todayString),
-      ),
+    let regularRides: RideWithMeta[] = [];
+    let earlyRides: EarlyRideRequest[] = [];
+    let loadedRegular = false;
+    let loadedEarly = false;
+
+    const updateMerged = () => {
+      if (loadedRegular && loadedEarly) {
+        const mappedEarly: RideWithMeta[] = earlyRides.filter(req => !req.rideId).map(req => {
+          let mappedStatus = req.status as any;
+          if (mappedStatus === "accepted") mappedStatus = "active";
+          if (mappedStatus === "waiting" || mappedStatus === "active") {
+            const d = req.createdAt?.toDate();
+            if (d) {
+              const offset = d.getTimezoneOffset() * 60000;
+              const dateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
+              if (dateStr < todayString) {
+                mappedStatus = "completed";
+              }
+            }
+          }
+
+          return {
+            rideId: req.requestId,
+            routeId: req.route,
+            routeName: req.route,
+            assignedDriverId: req.acceptedDriverId || "",
+            driverName: "Early Ride Driver",
+            date: todayString,
+            departureTime: req.createdAt ? formatTimeTo12Hour(req.createdAt.toDate()) : "TBD",
+            status: mappedStatus,
+            boardedCount: req.studentsJoined ? req.studentsJoined.length : 0,
+            studentIds: req.studentsJoined ? req.studentsJoined.map(s => s.studentId) : [],
+            createdAt: req.createdAt,
+            isEarlyRide: true,
+            vehicle: req.vehicle,
+            boysCount: req.boysCount || 0,
+            girlsCount: req.girlsCount || 0,
+          } as RideWithMeta & { vehicle?: any; boysCount?: number; girlsCount?: number };
+        });
+
+        const todayEarly = mappedEarly.filter(r => {
+           if (!r.createdAt) return false;
+           const d = r.createdAt.toDate();
+           const offset = d.getTimezoneOffset() * 60000;
+           return new Date(d.getTime() - offset).toISOString().split('T')[0] === todayString;
+        });
+
+        setTodayRides([...regularRides, ...todayEarly]);
+        setIsTodayRidesLoading(false);
+      }
+    };
+
+    const unsubRegular = onSnapshot(
+      query(collection(db, COLLECTIONS.RIDES), where("date", "==", todayString)),
       (snapshot) => {
-        const rides = snapshot.docs.map((rideDoc) => ({
+        regularRides = snapshot.docs.map((rideDoc) => ({
           ...(rideDoc.data() as RideWithMeta),
           rideId: rideDoc.id,
         }));
-        setTodayRides(rides);
-        setIsTodayRidesLoading(false);
+        loadedRegular = true;
+        updateMerged();
       },
       (error) => {
         console.error("Error fetching today's rides:", error);
         toast.error("Failed to load today's rides");
-        setIsTodayRidesLoading(false);
-      },
+        loadedRegular = true;
+        updateMerged();
+      }
     );
 
-    return () => unsubscribe();
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const unsubEarly = onSnapshot(
+      query(collection(db, COLLECTIONS.EARLY_RIDE_REQUESTS), where("createdAt", ">=", Timestamp.fromDate(todayStart))),
+      (snapshot) => {
+        earlyRides = snapshot.docs.map((doc) => ({ ...doc.data(), requestId: doc.id } as EarlyRideRequest));
+        loadedEarly = true;
+        updateMerged();
+      },
+      (error) => {
+        console.error("Error fetching today's early rides:", error);
+        loadedEarly = true;
+        updateMerged();
+      }
+    );
+
+    return () => {
+      unsubRegular();
+      unsubEarly();
+    };
   }, [todayString]);
 
   useEffect(() => {
@@ -406,28 +503,101 @@ export default function RidesPage() {
 
   useEffect(() => {
     setIsAllRidesLoading(true);
-    const unsubscribe = onSnapshot(
+    let regularRides: RideWithMeta[] = [];
+    let earlyRides: EarlyRideRequest[] = [];
+    let loadedRegular = false;
+    let loadedEarly = false;
+
+    const updateMerged = () => {
+      if (loadedRegular && loadedEarly) {
+        const mappedEarly: RideWithMeta[] = earlyRides.filter(req => !req.rideId).map(req => {
+          let dateStr = "";
+          if (req.createdAt) {
+            const d = req.createdAt.toDate();
+            const offset = d.getTimezoneOffset() * 60000;
+            dateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
+          }
+
+          let mappedStatus = req.status as any;
+          if (mappedStatus === "accepted") mappedStatus = "active";
+          if (mappedStatus === "waiting" || mappedStatus === "active") {
+            const todayStr = new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0];
+            if (dateStr && dateStr < todayStr) {
+              mappedStatus = "completed";
+            }
+          }
+
+          return {
+            rideId: req.requestId,
+            routeId: req.route,
+            routeName: req.route,
+            assignedDriverId: req.acceptedDriverId || "",
+            driverName: "Early Ride Driver",
+            date: dateStr,
+            departureTime: req.createdAt ? formatTimeTo12Hour(req.createdAt.toDate()) : "TBD",
+            status: mappedStatus,
+            boardedCount: req.studentsJoined ? req.studentsJoined.length : 0,
+            studentIds: req.studentsJoined ? req.studentsJoined.map(s => s.studentId) : [],
+            createdAt: req.createdAt,
+            isEarlyRide: true,
+            vehicle: req.vehicle,
+            boysCount: req.boysCount || 0,
+            girlsCount: req.girlsCount || 0,
+          } as RideWithMeta & { vehicle?: any; boysCount?: number; girlsCount?: number };
+        });
+
+        setAllRides([...regularRides, ...mappedEarly]);
+        setIsAllRidesLoading(false);
+      }
+    };
+
+    const unsubRegular = onSnapshot(
       query(
         collection(db, COLLECTIONS.RIDES),
         where("date", ">=", rangeStart),
         where("date", "<=", rangeEnd),
       ),
       (snapshot) => {
-        const rides = snapshot.docs.map((rideDoc) => ({
+        regularRides = snapshot.docs.map((rideDoc) => ({
           ...(rideDoc.data() as RideWithMeta),
           rideId: rideDoc.id,
         }));
-        setAllRides(rides);
-        setIsAllRidesLoading(false);
+        loadedRegular = true;
+        updateMerged();
       },
       (error) => {
         console.error("Error fetching rides:", error);
         toast.error("Failed to load rides table");
-        setIsAllRidesLoading(false);
-      },
+        loadedRegular = true;
+        updateMerged();
+      }
     );
 
-    return () => unsubscribe();
+    const startTimestamp = Timestamp.fromDate(new Date(`${rangeStart}T00:00:00`));
+    const endTimestamp = Timestamp.fromDate(new Date(`${rangeEnd}T23:59:59.999`));
+    
+    const unsubEarly = onSnapshot(
+      query(
+        collection(db, COLLECTIONS.EARLY_RIDE_REQUESTS),
+        where("createdAt", ">=", startTimestamp),
+        where("createdAt", "<=", endTimestamp)
+      ),
+      (snapshot) => {
+        earlyRides = snapshot.docs.map(doc => ({ ...doc.data(), requestId: doc.id } as EarlyRideRequest));
+        loadedEarly = true;
+        updateMerged();
+      },
+      (error) => {
+        console.error("Error fetching early rides:", error);
+        loadedEarly = true;
+        updateMerged();
+      }
+    );
+
+    return () => {
+      unsubRegular();
+      unsubEarly();
+    };
   }, [rangeEnd, rangeStart]);
 
   useEffect(() => {
@@ -546,9 +716,11 @@ export default function RidesPage() {
   const handleMarkCompleted = async (ride: RideWithMeta) => {
     setIsMarkingCompleted(true);
     try {
-      await updateDoc(doc(db, COLLECTIONS.RIDES, ride.rideId), {
+      const collectionName = ride.isEarlyRide ? COLLECTIONS.EARLY_RIDE_REQUESTS : COLLECTIONS.RIDES;
+      await updateDoc(doc(db, collectionName, ride.rideId), {
         status: "completed",
         completedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
       toast.success("Ride marked as completed");
     } catch (error) {
@@ -564,9 +736,11 @@ export default function RidesPage() {
 
     setIsCancelling(true);
     try {
-      await updateDoc(doc(db, COLLECTIONS.RIDES, cancelRideTarget.rideId), {
+      const collectionName = cancelRideTarget.isEarlyRide ? COLLECTIONS.EARLY_RIDE_REQUESTS : COLLECTIONS.RIDES;
+      await updateDoc(doc(db, collectionName, cancelRideTarget.rideId), {
         status: "cancelled",
         cancelledAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
 
       toast.success("Ride cancelled");
@@ -717,17 +891,23 @@ export default function RidesPage() {
                 const studentIds = route?.studentIds || [];
                 
                 const stats = getStudentAvailabilityStats(studentIds, ride.routeId, todayAvailabilityMap);
+                const driverProfile = studentsById.get(ride.assignedDriverId);
+                const enrichedRide = {
+                  ...ride,
+                  vehicleType: (ride as any).vehicleType || driverProfile?.vehicleType,
+                  vehiclePlate: (ride as any).vehiclePlate || driverProfile?.vehiclePlate
+                };
 
                 return (
                   <RideCard
                     key={ride.rideId}
-                    ride={ride}
-                    isEarlyRide={earlyRideRideIds.has(ride.rideId)}
+                    ride={enrichedRide as any}
+                    isEarlyRide={ride.isEarlyRide || earlyRideRideIds.has(ride.rideId)}
                     availableStudentsCount={stats.availableCount}
                     notAvailableStudentsCount={stats.notAvailableCount}
                     noResponseCount={stats.noResponseCount}
                     onViewDetails={() => setDetailModalRide({
-                      ...ride,
+                      ...enrichedRide,
                       availabilityStats: {
                         available: stats.availableCount,
                         notAvailable: stats.notAvailableCount,
@@ -749,9 +929,9 @@ export default function RidesPage() {
           <button
             type="button"
             onClick={exportToCSV}
-            className="inline-flex items-center gap-2 rounded-lg border border-emerald-600 px-3 py-1.5 text-sm font-semibold text-emerald-600 transition hover:bg-emerald-50"
+            className="bg-[#1e3a5f] hover:bg-[#152a45] text-white px-4 py-2 rounded-md flex items-center gap-2 transition-colors duration-200 shadow-sm"
           >
-            <Download className="h-4 w-4" />
+            <Download className="h-4 w-4 stroke-current" />
             Export CSV
           </button>
         </div>
@@ -861,8 +1041,10 @@ export default function RidesPage() {
                     >
                       <td className="px-4 py-3 text-sm font-semibold text-slate-900">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span>{ride.routeName}</span>
-                          {earlyRideRideIds.has(ride.rideId) ? (
+                          <span className="font-semibold text-slate-900">
+                            {ride.routeName}
+                          </span>
+                          {ride.isEarlyRide || earlyRideRideIds.has(ride.rideId) ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                               <Zap fill="currentColor" size={12} />
                               Early Ride

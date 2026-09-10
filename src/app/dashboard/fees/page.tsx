@@ -11,6 +11,8 @@ import {
   updateDoc,
   doc,
   addDoc,
+  deleteDoc,
+  deleteField,
 } from "firebase/firestore";
 import {
   ChevronLeft,
@@ -22,6 +24,7 @@ import {
   Banknote,
   Clock3,
   ShieldCheck,
+  ShieldOff,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { db } from "@/lib/firebase";
@@ -48,7 +51,7 @@ import RevenueChart from "@/components/fees/RevenueChart";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { format, subMonths, addMonths } from "date-fns";
 
-type TabType = "pending" | "all" | "outstanding" | "exempt";
+type TabType = 'all' | 'pending' | 'paid' | 'unpaid' | 'exempt';
 type SortKey = "name" | "amount" | "date" | "status";
 
 type RevenueSummary = {
@@ -57,8 +60,37 @@ type RevenueSummary = {
   outstanding: number;
 };
 
+const getMillis = (timestamp: any) =>
+  timestamp?.toMillis?.() ?? (timestamp?.seconds ? timestamp.seconds * 1000 : 0);
+
 type NormalizedFeePayment = FeePayment & {
   fareAmount?: number;
+};
+
+const getStatusDisplayText = (status: string, method?: string, isExempt?: boolean) => {
+  if (isExempt || status.toLowerCase() === "exempt") return "Exempt";
+
+  const isOnline =
+    method?.toLowerCase().includes("card") ||
+    method?.toLowerCase().includes("paddle");
+
+  if (status.toLowerCase() === "verified" || status.toLowerCase() === "paid") {
+    return isOnline ? "Paid" : "Verified";
+  }
+
+  if (
+    status.toLowerCase() === "pending" ||
+    status.toLowerCase() === "due" ||
+    status.toLowerCase() === "unpaid"
+  ) {
+    return "Unpaid";
+  }
+
+  if (status.toLowerCase() === "submitted") {
+    return isOnline ? "Unpaid" : "Pending";
+  }
+
+  return status.charAt(0).toUpperCase() + status.slice(1);
 };
 
 function normalizeFeePaymentRecord(
@@ -90,28 +122,22 @@ function normalizeFeePaymentRecord(
 }
 
 export default function FeesPage() {
-  const [activeTab, setActiveTab] = useState<TabType>("pending");
+  const [activeTab, setActiveTab] = useState<TabType>('all');
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthString());
-  const [allPayments, setAllPayments] = useState<NormalizedFeePayment[]>([]);
+  const [rawPayments, setRawPayments] = useState<NormalizedFeePayment[]>([]);
+  const [exemptions, setExemptions] = useState<any[]>([]);
   const [allPaymentsHistory, setAllPaymentsHistory] = useState<
     NormalizedFeePayment[]
   >([]);
-  const [pendingPayments, setPendingPayments] = useState<
-    NormalizedFeePayment[]
-  >([]);
+  const [pendingPaymentsState, setPendingPaymentsState] = useState<NormalizedFeePayment[]>([]);
   const [allStudents, setAllStudents] = useState<User[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
+  const [globalMonthlyFee, setGlobalMonthlyFee] = useState<number>(0);
   const [loading, setLoading] = useState(true);
-
-  // Summary card data
-  const [totalCollected, setTotalCollected] = useState(0);
-  const [pendingCount, setPendingCount] = useState(0);
-  const [verifiedCount, setVerifiedCount] = useState(0);
-  const [outstandingCount, setOutstandingCount] = useState(0);
 
   // Tabs state
   const [statusFilter, setStatusFilter] = useState<
-    "all" | "verified" | "submitted" | "pending"
+    "all" | "verified" | "submitted" | "pending" | "exempt"
   >("all");
   const [methodFilter, setMethodFilter] = useState<
     "all" | "bank_challan" | "easypaisa" | "jazzcash" | "paddle"
@@ -121,12 +147,13 @@ export default function FeesPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   // Outstanding fees state
-  const [outstandingStudents, setOutstandingStudents] = useState<
+  const [unpaidStudents, setUnpaidStudents] = useState<
     (User & { monthlyFeeAmount: number; daysSinceStart: number })[]
   >([]);
-  const [selectedOutstandingStudents, setSelectedOutstandingStudents] =
+  const [selectedUnpaidStudents, setSelectedUnpaidStudents] =
     useState<string[]>([]);
-  const [outstandingPageIndex, setOutstandingPageIndex] = useState(1);
+  const [unpaidPageIndex, setUnpaidPageIndex] = useState(1);
+  const [paidPageIndex, setPaidPageIndex] = useState(1);
   const [exemptPageIndex, setExemptPageIndex] = useState(1);
 
   // Revenue chart data
@@ -140,6 +167,63 @@ export default function FeesPage() {
   const [reminderLoading, setReminderLoading] = useState(false);
 
   const itemsPerPage = 20;
+
+  const getRouteDisplay = (routeData: string | string[] | undefined | null) => {
+    if (!routeData) return "—";
+    let routeArray: string[] = [];
+
+    if (Array.isArray(routeData)) {
+      routeArray = routeData;
+    } else if (typeof routeData === "string") {
+      try {
+        const parsed = JSON.parse(routeData);
+        if (Array.isArray(parsed)) {
+          routeArray = parsed;
+        } else {
+          routeArray = routeData.split(",").map(s => s.trim());
+        }
+      } catch (e) {
+        routeArray = routeData.split(",").map(s => s.trim());
+      }
+    }
+
+    if (routeArray.length === 0) return "—";
+
+    return (
+      <div className="flex flex-wrap gap-2">
+        {routeArray.map((idOrName, idx) => {
+          const found = routes.find(
+            (r) => r.routeId === idOrName || r.routeName === idOrName,
+          );
+          const displayName = found ? found.routeName : idOrName;
+          return (
+            <span
+              key={idx}
+              className="whitespace-nowrap rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-600"
+            >
+              {displayName}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const getStudentRoutes = (
+    studentId: string,
+    fallbackRouteId: string | undefined | null,
+  ) => {
+    const student = allStudents.find((s) => s.uid === studentId);
+    if (student) {
+      if (student.assignedRouteIds && student.assignedRouteIds.length > 0) {
+        return student.assignedRouteIds;
+      }
+      if (student.routeId) {
+        return student.routeId;
+      }
+    }
+    return fallbackRouteId;
+  };
 
   // Fetch all students
   useEffect(() => {
@@ -166,6 +250,32 @@ export default function FeesPage() {
     );
     return () => unsubscribe();
   }, []);
+
+  // Fetch global monthly fee
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      doc(db, COLLECTIONS.SETTINGS, "companyInfo"),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          setGlobalMonthlyFee(docSnap.data().monthlyFee || 0);
+        }
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch exemptions
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      query(collection(db, "exemptions"), where("month", "==", selectedMonth)),
+      (snapshot) => {
+        setExemptions(
+          snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+        );
+      }
+    );
+    return () => unsubscribe();
+  }, [selectedMonth]);
 
   // Fetch payments for selected month
   useEffect(() => {
@@ -216,15 +326,44 @@ export default function FeesPage() {
           )
           .sort(
             (a, b) =>
-              (b.submittedAt?.toMillis?.() ?? 0) -
-              (a.submittedAt?.toMillis?.() ?? 0),
+              getMillis(b.submittedAt) - getMillis(a.submittedAt),
           );
-        setAllPayments(payments);
+        setRawPayments(payments);
         setLoading(false);
       },
     );
     return () => unsubscribe();
   }, [selectedMonth]);
+
+  const allPayments = useMemo(() => {
+    const exemptionsAsPayments: FeePayment[] = exemptions.map((ex) => {
+      const ts = ex.exemptedAt || ex.createdAt || { seconds: Date.now() / 1000, nanoseconds: 0 };
+      return {
+        paymentId: ex.id,
+        studentId: ex.studentId,
+        studentName: ex.studentName || "Unknown Student",
+        routeId: ex.routeId || "",
+        month: ex.month,
+        amount: globalMonthlyFee,
+        paymentMethod: "exempted" as any,
+        paymentStatus: "exempt" as any,
+        submittedAt: ts,
+        verifiedAt: ts,
+        feeExempt: true,
+        exemptedAt: ts,
+        isExemptionDoc: true,
+      } as FeePayment & { isExemptionDoc?: boolean };
+    });
+
+    const merged = [...rawPayments, ...exemptionsAsPayments];
+    const uniqueMap = new Map<string, FeePayment>();
+    merged.forEach(p => {
+      // If a payment exists in both, we'll keep the last one (exemption)
+      uniqueMap.set(p.paymentId, p);
+    });
+
+    return Array.from(uniqueMap.values());
+  }, [rawPayments, exemptions, globalMonthlyFee]);
 
   // Fetch full payments history for multi-month chart
   useEffect(() => {
@@ -253,32 +392,56 @@ export default function FeesPage() {
   }, []);
 
   const studentFeeMap = useMemo(() => {
-    const routeMap = new Map(
-      routes.map((route) => [route.routeId, route.feeAmount || 0]),
-    );
-
     return new Map(
       allStudents
         .filter(
           (student) =>
-            Boolean(student.routeId) &&
-            (routeMap.get(student.routeId || "") || 0) > 0,
+            Boolean(student.routeId) && globalMonthlyFee > 0,
         )
         .map((student) => [
           student.uid,
-          routeMap.get(student.routeId || "") || 0,
+          globalMonthlyFee,
         ]),
     );
-  }, [allStudents, routes]);
+  }, [allStudents, globalMonthlyFee]);
 
   const expectedOutstandingAmount = useMemo(
     () =>
-      outstandingStudents.reduce(
+      unpaidStudents.reduce(
         (sum, student) => sum + (student.monthlyFeeAmount || 0),
         0,
       ),
-    [outstandingStudents],
+    [unpaidStudents],
   );
+
+  // Summary Card Calculations
+  const pendingPayments = useMemo(
+    () => allPayments.filter((payment) => isSubmittedForReview(payment)),
+    [allPayments]
+  );
+  const pendingCount = pendingPayments.length;
+  
+  const paidCount = useMemo(
+    () => allPayments.filter((payment) => isVerifiedPayment(payment)).length,
+    [allPayments]
+  );
+  
+  const totalCollected = useMemo(
+    () => allPayments.filter((payment) => isVerifiedPayment(payment)).reduce((sum, payment) => sum + normalizeFeeAmount(payment), 0),
+    [allPayments]
+  );
+
+  const settledStudents = useMemo(
+    () => new Set(allPayments.filter((payment) => isSettledForMonth(payment)).map((payment) => payment.studentId)),
+    [allPayments]
+  );
+
+  const unpaidCount = useMemo(
+    () => Array.from(studentFeeMap.keys()).filter((studentId) => !settledStudents.has(studentId)).length,
+    [studentFeeMap, settledStudents]
+  );
+  
+  const exemptCount = useMemo(() => exemptions.length, [exemptions]);
 
   const totalCollectionTarget = totalCollected + expectedOutstandingAmount;
   const collectedIndicatorPercent =
@@ -291,46 +454,18 @@ export default function FeesPage() {
     verificationBase > 0
       ? Math.round((pendingCount / verificationBase) * 100)
       : 0;
-  const verifiedIndicatorPercent =
+  const paidIndicatorPercent =
     verificationBase > 0
-      ? Math.round((verifiedCount / verificationBase) * 100)
+      ? Math.round((paidCount / verificationBase) * 100)
       : 0;
 
   const payableStudentsCount = studentFeeMap.size;
-  const outstandingIndicatorPercent =
+  const unpaidIndicatorPercent =
     payableStudentsCount > 0
-      ? Math.round((outstandingCount / payableStudentsCount) * 100)
+      ? Math.round((unpaidCount / payableStudentsCount) * 100)
       : 0;
 
-  useEffect(() => {
-    const submitted = allPayments.filter((payment) =>
-      isSubmittedForReview(payment),
-    );
-    const verified = allPayments.filter((payment) =>
-      isVerifiedPayment(payment),
-    );
-    const collected = verified.reduce(
-      (sum, payment) => sum + normalizeFeeAmount(payment),
-      0,
-    );
 
-    setPendingPayments(submitted);
-    setPendingCount(submitted.length);
-    setVerifiedCount(verified.length);
-    setTotalCollected(collected);
-
-    const settledStudents = new Set(
-      allPayments
-        .filter((payment) => isSettledForMonth(payment))
-        .map((payment) => payment.studentId),
-    );
-
-    const dueStudentsCount = Array.from(studentFeeMap.keys()).filter(
-      (studentId) => !settledStudents.has(studentId),
-    ).length;
-
-    setOutstandingCount(dueStudentsCount);
-  }, [allPayments, studentFeeMap]);
 
   // Calculate outstanding fees students
   useEffect(() => {
@@ -352,16 +487,16 @@ export default function FeesPage() {
         };
       })
       .filter(Boolean) as (User & {
-      monthlyFeeAmount: number;
-      daysSinceStart: number;
-    })[];
+        monthlyFeeAmount: number;
+        daysSinceStart: number;
+      })[];
 
     const filtered = outstanding.filter(
       (s) =>
         !allPayments.find((p) => p.studentId === s.uid && isSettledForMonth(p)),
     );
 
-    setOutstandingStudents(filtered);
+    setUnpaidStudents(filtered);
   }, [allStudents, allPayments, routes, selectedMonth, studentFeeMap]);
 
   // Build 6-month revenue data from real payment + route/student data
@@ -401,10 +536,14 @@ export default function FeesPage() {
 
   // Filter and sort all payments for the "All Payments" tab
   const filteredAllPayments = useMemo(() => {
-    let filtered = allPayments.filter((p) => p.feeExempt !== true);
+    let filtered = allPayments;
 
     if (statusFilter !== "all") {
-      filtered = filtered.filter((p) => p.paymentStatus === statusFilter);
+      if (statusFilter === "exempt") {
+        filtered = filtered.filter((p) => p.feeExempt === true);
+      } else {
+        filtered = filtered.filter((p) => p.paymentStatus === statusFilter && !p.feeExempt);
+      }
     }
     if (methodFilter !== "all") {
       filtered = filtered.filter((p) => p.paymentMethod === methodFilter);
@@ -422,7 +561,7 @@ export default function FeesPage() {
           return normalizeFeeAmount(b) - normalizeFeeAmount(a);
         case "date":
           return (
-            (b.submittedAt?.toMillis() || 0) - (a.submittedAt?.toMillis() || 0)
+            getMillis(b.submittedAt) - getMillis(a.submittedAt)
           );
         case "status":
           return normalizeFeeStatus(a.paymentStatus).localeCompare(
@@ -443,14 +582,25 @@ export default function FeesPage() {
     return filteredAllPayments.slice(start, start + itemsPerPage);
   }, [filteredAllPayments, currentPage]);
 
-  // Paginate for outstanding fees
-  const outstandingPagesCount = Math.ceil(
-    outstandingStudents.length / itemsPerPage,
+  // Paginate for paid fees
+  const paidPayments = useMemo(
+    () => allPayments.filter((p) => p.paymentStatus === "verified" && !p.feeExempt).sort((a, b) => getMillis(b.submittedAt) - getMillis(a.submittedAt)),
+    [allPayments]
   );
-  const paginatedOutstanding = useMemo(() => {
-    const start = (outstandingPageIndex - 1) * itemsPerPage;
-    return outstandingStudents.slice(start, start + itemsPerPage);
-  }, [outstandingStudents, outstandingPageIndex]);
+  const paidPagesCount = Math.ceil(paidPayments.length / itemsPerPage);
+  const paginatedPaid = useMemo(() => {
+    const start = (paidPageIndex - 1) * itemsPerPage;
+    return paidPayments.slice(start, start + itemsPerPage);
+  }, [paidPayments, paidPageIndex]);
+
+  // Paginate for unpaid fees
+  const unpaidPagesCount = Math.ceil(
+    unpaidStudents.length / itemsPerPage,
+  );
+  const paginatedUnpaid = useMemo(() => {
+    const start = (unpaidPageIndex - 1) * itemsPerPage;
+    return unpaidStudents.slice(start, start + itemsPerPage);
+  }, [unpaidStudents, unpaidPageIndex]);
 
   const exemptPayments = useMemo(
     () =>
@@ -458,8 +608,8 @@ export default function FeesPage() {
         .filter((p) => p.feeExempt === true)
         .sort(
           (a, b) =>
-            (b.exemptedAt?.toMillis?.() ?? b.submittedAt?.toMillis?.() ?? 0) -
-            (a.exemptedAt?.toMillis?.() ?? a.submittedAt?.toMillis?.() ?? 0),
+            (getMillis(b.exemptedAt) || getMillis(b.submittedAt)) -
+            (getMillis(a.exemptedAt) || getMillis(a.submittedAt)),
         ),
     [allPayments],
   );
@@ -502,36 +652,17 @@ export default function FeesPage() {
 
   const handleMarkAsExempt = async (studentId: string) => {
     try {
-      const existingPayment = allPayments.find(
-        (p) => p.studentId === studentId,
-      );
+      const student = allStudents.find((s) => s.uid === studentId);
+      const exemptionDocId = `${studentId}_${selectedMonth}_exempt`;
 
-      if (existingPayment) {
-        await updateDoc(
-          doc(db, COLLECTIONS.FEE_PAYMENTS, existingPayment.paymentId),
-          {
-            feeExempt: true,
-            exemptedAt: serverTimestamp(),
-          },
-        );
-      } else {
-        const student = allStudents.find((s) => s.uid === studentId);
-        const route = routes.find((r) => r.routeId === student?.routeId);
-        const exemptionDocId = `${studentId}_${selectedMonth}_exempt`;
-
-        await setDoc(doc(db, COLLECTIONS.FEE_PAYMENTS, exemptionDocId), {
-          studentId,
-          studentName: student?.fullName || "Unknown Student",
-          routeId: student?.routeId || "",
-          month: selectedMonth,
-          amount: route?.feeAmount || 0,
-          paymentMethod: "bank_challan",
-          paymentStatus: "pending",
-          feeExempt: true,
-          exemptedAt: serverTimestamp(),
-          submittedAt: serverTimestamp(),
-        });
-      }
+      await setDoc(doc(db, "exemptions", exemptionDocId), {
+        studentId,
+        studentName: student?.fullName || "Unknown Student",
+        routeId: student?.routeId || "",
+        month: selectedMonth,
+        exemptedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      });
 
       toast.success(`Student marked as exempt for ${selectedMonth}`);
     } catch (error) {
@@ -540,8 +671,25 @@ export default function FeesPage() {
     }
   };
 
+  const handleUnexempt = async (paymentId: string, isExemptionDoc?: boolean) => {
+    try {
+      if (isExemptionDoc) {
+        await deleteDoc(doc(db, "exemptions", paymentId));
+      } else {
+        await updateDoc(doc(db, COLLECTIONS.FEE_PAYMENTS, paymentId), {
+          feeExempt: false,
+          exemptedAt: deleteField(),
+        });
+      }
+      toast.success("Exemption removed successfully");
+    } catch (error) {
+      console.error("Unexempt error:", error);
+      toast.error("Failed to remove exemption");
+    }
+  };
+
   const handleSendReminders = async () => {
-    if (selectedOutstandingStudents.length === 0) {
+    if (selectedUnpaidStudents.length === 0) {
       toast.error("Please select at least one student");
       return;
     }
@@ -549,16 +697,16 @@ export default function FeesPage() {
     setReminderLoading(true);
     try {
       // Update reminderSentAt for selected students
-      for (const studentId of selectedOutstandingStudents) {
+      for (const studentId of selectedUnpaidStudents) {
         await updateDoc(doc(db, COLLECTIONS.USERS, studentId), {
           reminderSentAt: serverTimestamp(),
         });
       }
 
       toast.success(
-        `Reminders sent to ${selectedOutstandingStudents.length} student(s)`,
+        `Reminders sent to ${selectedUnpaidStudents.length} student(s)`,
       );
-      setSelectedOutstandingStudents([]);
+      setSelectedUnpaidStudents([]);
       setReminderConfirmOpen(false);
     } catch (error) {
       console.error("Send reminder error:", error);
@@ -627,12 +775,12 @@ export default function FeesPage() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3 lg:grid-cols-5">
         <MetricTile
           title="Total Collected"
           value={formatPKR(totalCollected)}
           icon={<Banknote size={24} />}
-          subtitle={`${verifiedCount} verified`}
+          subtitle={`${paidCount} verified`}
           trend={totalCollected > 0 ? "up" : "neutral"}
           indicatorPercent={collectedIndicatorPercent}
         />
@@ -649,20 +797,28 @@ export default function FeesPage() {
           }}
         />
         <MetricTile
-          title="Verified Payments"
-          value={verifiedCount}
+          title="PAID"
+          value={paidCount}
           icon={<ShieldCheck size={24} />}
           subtitle={`${selectedMonth} approved`}
-          trend={verifiedCount > 0 ? "up" : "neutral"}
-          indicatorPercent={verifiedIndicatorPercent}
+          trend={paidCount > 0 ? "up" : "neutral"}
+          indicatorPercent={paidIndicatorPercent}
         />
         <MetricTile
-          title="Outstanding"
-          value={outstandingCount}
+          title="UNPAID"
+          value={unpaidCount}
           icon={<AlertCircle size={24} />}
           subtitle="students with due fees"
-          trend={outstandingCount > 0 ? "down" : "up"}
-          indicatorPercent={outstandingIndicatorPercent}
+          trend={unpaidCount > 0 ? "down" : "up"}
+          indicatorPercent={unpaidIndicatorPercent}
+        />
+        <MetricTile
+          title="EXEMPT"
+          value={exemptCount}
+          icon={<ShieldOff size={24} />}
+          subtitle="exemptions this month"
+          trend="neutral"
+          indicatorPercent={0}
         />
       </div>
 
@@ -672,14 +828,25 @@ export default function FeesPage() {
           <div className="flex gap-8 px-6">
             <button
               onClick={() => {
+                setActiveTab("all");
+                setCurrentPage(1);
+              }}
+              className={`py-4 font-semibold border-b-2 transition-colors ${activeTab === "all"
+                  ? "border-[var(--accent)] text-[var(--primary)]"
+                  : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
+                }`}
+            >
+              All Payments
+            </button>
+            <button
+              onClick={() => {
                 setActiveTab("pending");
                 setCurrentPage(1);
               }}
-              className={`py-4 font-semibold border-b-2 transition-colors ${
-                activeTab === "pending"
+              className={`py-4 font-semibold border-b-2 transition-colors ${activeTab === "pending"
                   ? "border-[var(--accent)] text-[var(--primary)]"
                   : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
-              }`}
+                }`}
             >
               Pending Verification
               {pendingCount > 0 && (
@@ -690,40 +857,37 @@ export default function FeesPage() {
             </button>
             <button
               onClick={() => {
-                setActiveTab("all");
-                setCurrentPage(1);
+                setActiveTab("paid");
+                setPaidPageIndex(1);
               }}
-              className={`py-4 font-semibold border-b-2 transition-colors ${
-                activeTab === "all"
+              className={`py-4 font-semibold border-b-2 transition-colors ${activeTab === "paid"
                   ? "border-[var(--accent)] text-[var(--primary)]"
                   : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
-              }`}
+                }`}
             >
-              All Payments
+              Paid Fees
             </button>
             <button
               onClick={() => {
-                setActiveTab("outstanding");
-                setOutstandingPageIndex(1);
+                setActiveTab("unpaid");
+                setUnpaidPageIndex(1);
               }}
-              className={`py-4 font-semibold border-b-2 transition-colors ${
-                activeTab === "outstanding"
+              className={`py-4 font-semibold border-b-2 transition-colors ${activeTab === "unpaid"
                   ? "border-[var(--accent)] text-[var(--primary)]"
                   : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
-              }`}
+                }`}
             >
-              Outstanding Fees
+              Unpaid Fees
             </button>
             <button
               onClick={() => {
                 setActiveTab("exempt");
                 setExemptPageIndex(1);
               }}
-              className={`py-4 font-semibold border-b-2 transition-colors ${
-                activeTab === "exempt"
+              className={`py-4 font-semibold border-b-2 transition-colors ${activeTab === "exempt"
                   ? "border-[var(--accent)] text-[var(--primary)]"
                   : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text)]"
-              }`}
+                }`}
             >
               Exempt Fees
             </button>
@@ -744,7 +908,7 @@ export default function FeesPage() {
                 pendingPayments.map((payment) => (
                   <PaymentCard
                     key={payment.paymentId}
-                    payment={payment}
+                    payment={{ ...payment, amount: globalMonthlyFee, routeId: getRouteDisplay(getStudentRoutes(payment.studentId, payment.routeId)) as any }}
                     onReceiptView={handleReceiptView}
                   />
                 ))
@@ -766,10 +930,11 @@ export default function FeesPage() {
                     onChange={(e) => {
                       setStatusFilter(
                         e.target.value as
-                          | "all"
-                          | "verified"
-                          | "submitted"
-                          | "pending",
+                        | "all"
+                        | "verified"
+                        | "submitted"
+                        | "pending"
+                        | "exempt",
                       );
                       setCurrentPage(1);
                     }}
@@ -779,6 +944,7 @@ export default function FeesPage() {
                     <option value="verified">Verified</option>
                     <option value="submitted">Submitted</option>
                     <option value="pending">Pending</option>
+                    <option value="exempt">Exempt</option>
                   </select>
                 </div>
                 <div>
@@ -790,11 +956,11 @@ export default function FeesPage() {
                     onChange={(e) => {
                       setMethodFilter(
                         e.target.value as
-                          | "all"
-                          | "bank_challan"
-                          | "easypaisa"
-                          | "jazzcash"
-                          | "paddle",
+                        | "all"
+                        | "bank_challan"
+                        | "easypaisa"
+                        | "jazzcash"
+                        | "paddle",
                       );
                       setCurrentPage(1);
                     }}
@@ -902,14 +1068,13 @@ export default function FeesPage() {
                             {payment.studentName}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
-                            {routes.find((r) => r.routeId === payment.routeId)
-                              ?.routeName || payment.routeId}
+                            {getRouteDisplay(getStudentRoutes(payment.studentId, payment.routeId))}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {formatPaymentMethod(payment.paymentMethod)}
                           </td>
                           <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                            {formatPKR(payment.amount)}
+                            {formatPKR(globalMonthlyFee)}
                           </td>
                           <td className="px-4 py-3">
                             <span
@@ -917,13 +1082,11 @@ export default function FeesPage() {
                                 payment,
                               )}`}
                             >
-                              {payment.feeExempt
-                                ? "Exempt"
-                                : payment.paymentStatus === "verified"
-                                  ? "Verified"
-                                  : payment.paymentStatus === "submitted"
-                                    ? "Submitted"
-                                    : "Pending"}
+                              {getStatusDisplayText(
+                                payment.paymentStatus,
+                                payment.paymentMethod,
+                                payment.feeExempt
+                              )}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-slate-600">
@@ -932,7 +1095,9 @@ export default function FeesPage() {
                           <td className="px-4 py-3 text-slate-600">
                             {payment.verifiedAt
                               ? formatTimestamp(payment.verifiedAt)
-                              : "—"}
+                              : payment.feeExempt && payment.exemptedAt
+                                ? formatTimestamp(payment.exemptedAt)
+                                : "—"}
                           </td>
                         </tr>
                       ))
@@ -967,11 +1132,10 @@ export default function FeesPage() {
                         <button
                           key={page}
                           onClick={() => setCurrentPage(page)}
-                          className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                            currentPage === page
+                          className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${currentPage === page
                               ? "bg-blue-600 text-white"
                               : "border border-slate-200 hover:bg-slate-50"
-                          }`}
+                            }`}
                         >
                           {page}
                         </button>
@@ -982,6 +1146,91 @@ export default function FeesPage() {
                         setCurrentPage(Math.min(totalPages, currentPage + 1))
                       }
                       disabled={currentPage === totalPages}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: Paid Fees */}
+          {activeTab === "paid" && (
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50">
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Student Name</th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Route</th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Method</th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">Amount</th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Status</th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Submitted</th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">Verified</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedPaid.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-600">No paid fees found</td>
+                      </tr>
+                    ) : (
+                      paginatedPaid.map((payment) => (
+                        <tr key={payment.paymentId} className="border-b border-slate-200 hover:bg-slate-50">
+                          <td className="px-4 py-3 font-medium text-slate-900">{payment.studentName}</td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {getRouteDisplay(getStudentRoutes(payment.studentId, payment.routeId))}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">{formatPaymentMethod(payment.paymentMethod)}</td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatPKR(globalMonthlyFee)}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${getStatusBadgeClass(payment)}`}>
+                              {getStatusDisplayText(
+                                payment.paymentStatus,
+                                payment.paymentMethod,
+                                payment.feeExempt
+                              )}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">{formatTimestamp(payment.submittedAt)}</td>
+                          <td className="px-4 py-3 text-slate-600">{payment.verifiedAt ? formatTimestamp(payment.verifiedAt) : "—"}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              {paidPagesCount > 1 && (
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-slate-600">
+                    Showing {(paidPageIndex - 1) * itemsPerPage + 1} to{" "}
+                    {Math.min(paidPageIndex * itemsPerPage, paidPayments.length)} of {paidPayments.length}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setPaidPageIndex(Math.max(1, paidPageIndex - 1))}
+                      disabled={paidPageIndex === 1}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    {Array.from({ length: paidPagesCount }, (_, i) => i + 1).map((page) => (
+                      <button
+                        key={page}
+                        onClick={() => setPaidPageIndex(page)}
+                        className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${paidPageIndex === page ? "bg-blue-600 text-white" : "border border-slate-200 hover:bg-slate-50"}`}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setPaidPageIndex(Math.min(paidPagesCount, paidPageIndex + 1))}
+                      disabled={paidPageIndex === paidPagesCount}
                       className="rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Next
@@ -1017,6 +1266,9 @@ export default function FeesPage() {
                       <th className="px-4 py-3 text-left font-semibold text-slate-700">
                         Status
                       </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1039,13 +1291,10 @@ export default function FeesPage() {
                             {payment.studentName}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
-                            {routes.find((r) => r.routeId === payment.routeId)
-                              ?.routeName ||
-                              payment.routeId ||
-                              "—"}
+                            {getRouteDisplay(getStudentRoutes(payment.studentId, payment.routeId))}
                           </td>
                           <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                            {formatPKR(payment.amount)}
+                            {formatPKR(globalMonthlyFee)}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {payment.month}
@@ -1059,6 +1308,14 @@ export default function FeesPage() {
                             <span className="inline-block rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-800">
                               Exempt
                             </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              onClick={() => handleUnexempt(payment.paymentId, (payment as any).isExemptionDoc)}
+                              className="inline-block rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800 transition-colors hover:bg-red-200"
+                            >
+                              Unexempt
+                            </button>
                           </td>
                         </tr>
                       ))
@@ -1094,11 +1351,10 @@ export default function FeesPage() {
                       <button
                         key={page}
                         onClick={() => setExemptPageIndex(page)}
-                        className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                          exemptPageIndex === page
+                        className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${exemptPageIndex === page
                             ? "bg-blue-600 text-white"
                             : "border border-slate-200 hover:bg-slate-50"
-                        }`}
+                          }`}
                       >
                         {page}
                       </button>
@@ -1120,20 +1376,20 @@ export default function FeesPage() {
             </div>
           )}
 
-          {/* TAB 3: Outstanding Fees */}
-          {activeTab === "outstanding" && (
+          {/* TAB 4: Unpaid Fees */}
+          {activeTab === "unpaid" && (
             <div className="space-y-4">
-              {selectedOutstandingStudents.length > 0 && (
+              {selectedUnpaidStudents.length > 0 && (
                 <div className="flex gap-2">
                   <button
                     onClick={() => setReminderConfirmOpen(true)}
                     className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm font-semibold transition-colors"
                   >
                     <Mail size={16} />
-                    Send Fee Reminder ({selectedOutstandingStudents.length})
+                    Send Fee Reminder ({selectedUnpaidStudents.length})
                   </button>
                   <button
-                    onClick={() => setSelectedOutstandingStudents([])}
+                    onClick={() => setSelectedUnpaidStudents([])}
                     className="rounded-lg border border-slate-200 px-4 py-2 text-sm hover:bg-slate-50"
                   >
                     Clear Selection
@@ -1149,22 +1405,22 @@ export default function FeesPage() {
                         <input
                           type="checkbox"
                           checked={
-                            paginatedOutstanding.length > 0 &&
-                            paginatedOutstanding.every((s) =>
-                              selectedOutstandingStudents.includes(s.uid),
+                            paginatedUnpaid.length > 0 &&
+                            paginatedUnpaid.every((s) =>
+                              selectedUnpaidStudents.includes(s.uid),
                             )
                           }
                           onChange={(e) => {
                             if (e.target.checked) {
-                              setSelectedOutstandingStudents([
-                                ...selectedOutstandingStudents,
-                                ...paginatedOutstanding.map((s) => s.uid),
+                              setSelectedUnpaidStudents([
+                                ...selectedUnpaidStudents,
+                                ...paginatedUnpaid.map((s) => s.uid),
                               ]);
                             } else {
-                              setSelectedOutstandingStudents(
-                                selectedOutstandingStudents.filter(
+                              setSelectedUnpaidStudents(
+                                selectedUnpaidStudents.filter(
                                   (id) =>
-                                    !paginatedOutstanding.some(
+                                    !paginatedUnpaid.some(
                                       (s) => s.uid === id,
                                     ),
                                 ),
@@ -1192,17 +1448,17 @@ export default function FeesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedOutstanding.length === 0 ? (
+                    {paginatedUnpaid.length === 0 ? (
                       <tr>
                         <td
                           colSpan={6}
                           className="px-4 py-8 text-center text-slate-600"
                         >
-                          No outstanding fees
+                          No unpaid fees
                         </td>
                       </tr>
                     ) : (
-                      paginatedOutstanding.map((student) => (
+                      paginatedUnpaid.map((student) => (
                         <tr
                           key={student.uid}
                           className="border-b border-slate-200 hover:bg-slate-50"
@@ -1210,18 +1466,18 @@ export default function FeesPage() {
                           <td className="px-4 py-3">
                             <input
                               type="checkbox"
-                              checked={selectedOutstandingStudents.includes(
+                              checked={selectedUnpaidStudents.includes(
                                 student.uid,
                               )}
                               onChange={(e) => {
                                 if (e.target.checked) {
-                                  setSelectedOutstandingStudents([
-                                    ...selectedOutstandingStudents,
+                                  setSelectedUnpaidStudents([
+                                    ...selectedUnpaidStudents,
                                     student.uid,
                                   ]);
                                 } else {
-                                  setSelectedOutstandingStudents(
-                                    selectedOutstandingStudents.filter(
+                                  setSelectedUnpaidStudents(
+                                    selectedUnpaidStudents.filter(
                                       (id) => id !== student.uid,
                                     ),
                                   );
@@ -1234,10 +1490,11 @@ export default function FeesPage() {
                             {student.fullName}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
-                            {routes.find((r) => r.routeId === student.routeId)
-                              ?.routeName ||
-                              student.routeId ||
-                              "—"}
+                            {getRouteDisplay(
+                              student.assignedRouteIds && student.assignedRouteIds.length > 0
+                                ? student.assignedRouteIds
+                                : student.routeId
+                            )}
                           </td>
                           <td className="px-4 py-3 text-right font-semibold text-slate-900">
                             {formatPKR(student.monthlyFeeAmount)}
@@ -1248,7 +1505,7 @@ export default function FeesPage() {
                           <td className="px-4 py-3">
                             <button
                               onClick={() => handleMarkAsExempt(student.uid)}
-                              className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                              className="inline-block rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800 transition-colors hover:bg-blue-200"
                             >
                               Mark as Exempt
                             </button>
@@ -1261,54 +1518,53 @@ export default function FeesPage() {
               </div>
 
               {/* Pagination */}
-              {outstandingPagesCount > 1 && (
+              {unpaidPagesCount > 1 && (
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-slate-600">
-                    Showing {(outstandingPageIndex - 1) * itemsPerPage + 1} to{" "}
+                    Showing {(unpaidPageIndex - 1) * itemsPerPage + 1} to{" "}
                     {Math.min(
-                      outstandingPageIndex * itemsPerPage,
-                      outstandingStudents.length,
+                      unpaidPageIndex * itemsPerPage,
+                      unpaidStudents.length,
                     )}{" "}
-                    of {outstandingStudents.length}
+                    of {unpaidStudents.length}
                   </p>
                   <div className="flex gap-2">
                     <button
                       onClick={() =>
-                        setOutstandingPageIndex(
-                          Math.max(1, outstandingPageIndex - 1),
+                        setUnpaidPageIndex(
+                          Math.max(1, unpaidPageIndex - 1),
                         )
                       }
-                      disabled={outstandingPageIndex === 1}
+                      disabled={unpaidPageIndex === 1}
                       className="rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Previous
                     </button>
                     {Array.from(
-                      { length: outstandingPagesCount },
+                      { length: unpaidPagesCount },
                       (_, i) => i + 1,
                     ).map((page) => (
                       <button
                         key={page}
-                        onClick={() => setOutstandingPageIndex(page)}
-                        className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                          outstandingPageIndex === page
+                        onClick={() => setUnpaidPageIndex(page)}
+                        className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${unpaidPageIndex === page
                             ? "bg-blue-600 text-white"
                             : "border border-slate-200 hover:bg-slate-50"
-                        }`}
+                          }`}
                       >
                         {page}
                       </button>
                     ))}
                     <button
                       onClick={() =>
-                        setOutstandingPageIndex(
+                        setUnpaidPageIndex(
                           Math.min(
-                            outstandingPagesCount,
-                            outstandingPageIndex + 1,
+                            unpaidPagesCount,
+                            unpaidPageIndex + 1,
                           ),
                         )
                       }
-                      disabled={outstandingPageIndex === outstandingPagesCount}
+                      disabled={unpaidPageIndex === unpaidPagesCount}
                       className="rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Next
@@ -1334,7 +1590,7 @@ export default function FeesPage() {
       <ConfirmDialog
         open={reminderConfirmOpen}
         title="Send Fee Reminders"
-        message={`Send fee reminders to ${selectedOutstandingStudents.length} selected student(s)?`}
+        message={`Send fee reminders to ${selectedUnpaidStudents.length} selected student(s)?`}
         confirmLabel="Send"
         cancelLabel="Cancel"
         onConfirm={handleSendReminders}

@@ -84,7 +84,7 @@ function getDisplayStatus(
 function getStatusBadgeProps(status: EarlyRideDisplayStatus) {
   switch (status) {
     case "waiting":
-      return { variant: "warning" as const, label: "Requested" };
+      return { variant: "warning" as const, label: "Waiting" };
     case "accepted":
       return { variant: "success" as const, label: "Accepted" };
     case "active":
@@ -500,7 +500,7 @@ export default function EarlyRideSharingPage() {
         <div className="flex flex-wrap items-center gap-2">
           {([
             ["all", "All"],
-            ["waiting", "Requested"],
+            ["waiting", "Waiting"],
             ["accepted", "Accepted"],
             ["active", "Active"],
             ["completed", "Completed"],

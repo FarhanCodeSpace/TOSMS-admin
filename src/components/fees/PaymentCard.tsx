@@ -186,8 +186,11 @@ export default function PaymentCard({
             <p className="font-semibold text-slate-900 truncate">
               {payment.studentName}
             </p>
-            <p className="text-sm text-slate-600">Route: {payment.routeId}</p>
-            <p className="text-sm text-slate-600">Month: {payment.month}</p>
+            <div className="text-sm text-slate-600 flex items-center gap-2">
+              <span className="shrink-0">Route:</span> 
+              <div className="flex-1">{payment.routeId as React.ReactNode}</div>
+            </div>
+            <p className="text-sm text-slate-600 mt-1">Month: {payment.month}</p>
           </div>
         </div>
 
