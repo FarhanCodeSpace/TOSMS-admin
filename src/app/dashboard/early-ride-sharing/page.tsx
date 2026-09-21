@@ -8,9 +8,11 @@ import {
   orderBy,
   query,
   where,
+  doc,
+  updateDoc,
   type Timestamp,
 } from "firebase/firestore";
-import { ChevronRight, User as UserIcon, Eye } from "lucide-react";
+import { ChevronRight, User as UserIcon, Eye, Bus, Users } from "lucide-react";
 import toast from "react-hot-toast";
 
 import Badge from "@/components/ui/Badge";
@@ -22,6 +24,7 @@ import { useAuth } from "@/context/AuthContext";
 import { COLLECTIONS } from "@/lib/collections";
 import { db } from "@/lib/firebase";
 import { formatTimestamp } from "@/utils/formatters";
+import { formatDateDisplay, getTodayString } from "@/utils/dateHelpers";
 import type { EarlyRideRequest, Ride, User, Route } from "@/types";
 import StudentDetailModal from "@/app/dashboard/students/StudentDetailModal";
 import DriverDetailModal from "@/components/drivers/DriverDetailModal";
@@ -474,6 +477,36 @@ export default function EarlyRideSharingPage() {
     );
   }, [activeFilter, requestsWithDisplayStatus]);
 
+  const todayString = useMemo(() => getTodayString(), []);
+
+  const updateRideStatus = async (requestId: string, rideId: string | null | undefined, newStatus: string) => {
+    try {
+      if (rideId) {
+        await updateDoc(doc(db, COLLECTIONS.RIDES, rideId), {
+          status: newStatus
+        });
+      }
+      await updateDoc(doc(db, COLLECTIONS.EARLY_RIDE_REQUESTS, requestId), {
+        status: newStatus
+      });
+      toast.success("Status updated successfully");
+    } catch (error) {
+      console.error("Error updating status:", error);
+      toast.error("Failed to update status");
+    }
+  };
+
+  const todayEarlyRides = useMemo(() => {
+    return requestsWithDisplayStatus.filter(({ request }) => {
+      if (!request.createdAt) return false;
+      const d = toDate(request.createdAt);
+      if (!d) return false;
+      const offset = d.getTimezoneOffset() * 60000;
+      const dateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
+      return dateStr === todayString;
+    });
+  }, [requestsWithDisplayStatus, todayString]);
+
   const selectedRequest = useMemo(() => {
     if (!selectedRequestId) return null;
     return requests.find((request) => request.id === selectedRequestId) ?? null;
@@ -510,6 +543,112 @@ export default function EarlyRideSharingPage() {
           { label: "Early Ride Sharing" },
         ]}
       />
+
+      <section className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-[var(--text)]">Today's Early Rides</h2>
+          <p className="text-sm font-semibold text-[var(--text-secondary)]">{formatDateDisplay(todayString)}</p>
+        </div>
+        {isLoading ? (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <SkeletonLoader variant="card" className="h-48" />
+            <SkeletonLoader variant="card" className="h-48" />
+          </div>
+        ) : todayEarlyRides.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+            No early ride requests for today.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {todayEarlyRides.map(({ request, displayStatus }) => {
+              const ride = request as any;
+              
+              let displayBoys = ride.boysCount || 0;
+              let displayGirls = ride.girlsCount || 0;
+
+              if (displayBoys === 0 && displayGirls === 0 && (ride.status === 'withdrawn' || ride.status === 'cancelled' || ride.studentsJoined?.length === 0)) {
+                  const creatorGender = ride.creatorGender || ride.requestedBy?.gender?.toLowerCase() || ride.studentGender?.toLowerCase();
+                  if (creatorGender === 'female' || creatorGender === 'girl') {
+                      displayGirls = 1;
+                  } else {
+                      displayBoys = 1; 
+                  }
+              }
+              const displayTotal = ride.totalStudents || (ride.studentsJoined?.length > 0 ? ride.studentsJoined.length : 1);
+
+              const resolvedDriverId = ride.driverId || request.acceptedDriverId;
+              const driver = resolvedDriverId ? driversById[resolvedDriverId] : undefined;
+              
+              const vehicleName = request.vehicle?.name || driver?.vehicleType || "TBD";
+              const vehiclePlate = request.vehicle?.plateNumber || driver?.vehiclePlate || "TBD";
+
+              const driverName = driver?.fullName || request.acceptedDriverId || "Unassigned";
+
+              return (
+                <div key={request.id} className="relative flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex justify-between items-start gap-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">{request.route}</h3>
+                      <p className="text-sm text-slate-500 mt-1">Driver: {driverName}</p>
+                    </div>
+                    <RideStatusBadge status={displayStatus} />
+                  </div>
+                  
+                  <div className="flex flex-col gap-2 mt-2">
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-gray-50 px-3 py-3 text-sm font-semibold text-slate-900">
+                      <Users className="h-5 w-5 text-emerald-600" />
+                      Students: {displayTotal} (👦 {displayBoys} 👧 {displayGirls})
+                    </div>
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
+                      <Bus className="h-5 w-5 text-blue-500" />
+                      Vehicle: {vehicleName} - {vehiclePlate}
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-between items-center mt-2">
+                    <div className="flex gap-2">
+                      {displayStatus === "waiting" && (
+                        <button
+                          type="button"
+                          onClick={() => updateRideStatus(request.id, request.rideId, "cancelled")}
+                          className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-100"
+                        >
+                          Cancel Ride
+                        </button>
+                      )}
+                      {(displayStatus === "accepted" || displayStatus === "active") && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => updateRideStatus(request.id, request.rideId, "completed")}
+                            className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                          >
+                            Mark as Completed
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateRideStatus(request.id, request.rideId, "cancelled")}
+                            className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-100"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                    </div>
+                     <button
+                        type="button"
+                        onClick={() => setSelectedRequestId(request.id)}
+                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        View Details
+                      </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <Card className="p-4 md:p-5">
         <div className="flex flex-wrap items-center gap-2">
@@ -668,7 +807,7 @@ export default function EarlyRideSharingPage() {
                             : "N/A"}
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-sm">
-                        <RideStatusBadge status={request.status} />
+                        <RideStatusBadge status={displayStatus} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-sm text-[var(--text-muted)]">
                         {toDate(request.createdAt)

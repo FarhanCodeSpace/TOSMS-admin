@@ -157,6 +157,7 @@ type RideDetailModalProps = {
   driverProfile?: User | null;
   allUsersById?: Record<string, User>;
   allStudentsById?: Record<string, User>;
+  earlyRidesByRideId?: Record<string, EarlyRideRequest>;
   onClose: () => void;
   onGoLive: (() => void) | null;
 };
@@ -167,6 +168,7 @@ function RideDetailModal({
   driverProfile,
   allUsersById,
   allStudentsById,
+  earlyRidesByRideId,
   onClose,
   onGoLive,
 }: RideDetailModalProps) {
@@ -188,28 +190,25 @@ function RideDetailModal({
     displayStatus = 'accepted';
   }
 
-  let displayBoys = 0;
-  let displayGirls = 0;
-  let displayTotal = 1;
+  let displayMales = (ride as any).maleCount || 0;
+  let displayFemales = (ride as any).femaleCount || 0;
+  let displayTotal = (ride as any).totalStudents || 1;
 
   if (isActuallyEarlyRide) {
-    let calculatedMales = 0;
-    let calculatedFemales = 0;
-    const studentsList = Array.isArray((ride as any).studentsJoined) ? (ride as any).studentsJoined : [];
+    const sourceData = (ride.rideId && earlyRidesByRideId?.[ride.rideId]) ? earlyRidesByRideId[ride.rideId] : ride;
 
-    studentsList.forEach((s: any) => {
-      const studentId = typeof s === 'string' ? s : (s.id || s.studentId);
-      // Use the globally fetched dictionary here!
-      const profile = allStudentsById?.[studentId] || s; 
-      const gender = (profile as any)?.gender?.toLowerCase();
+    displayMales = (sourceData as any).boysCount || 0;
+    displayFemales = (sourceData as any).girlsCount || 0;
 
-      if (gender === 'male') calculatedMales++;
-      if (gender === 'female') calculatedFemales++;
-    });
-
-    displayBoys = (ride as any).maleCount ?? calculatedMales;
-    displayGirls = (ride as any).femaleCount ?? calculatedFemales;
-    displayTotal = (ride as any).totalStudents ?? (studentsList.length > 0 ? studentsList.length : Math.max(1, displayBoys + displayGirls));
+    if (displayMales === 0 && displayFemales === 0 && (sourceData.status === 'withdrawn' || sourceData.status === 'cancelled' || !(sourceData as any).studentsJoined || (sourceData as any).studentsJoined?.length === 0)) {
+        const creatorGender = (sourceData as any).creatorGender || (sourceData as any).requestedBy?.gender?.toLowerCase() || (sourceData as any).studentGender?.toLowerCase();
+        if (creatorGender === 'female' || creatorGender === 'girl') {
+            displayFemales = 1;
+        } else {
+            displayMales = 1; 
+        }
+    }
+    displayTotal = (sourceData as any).totalStudents || ((sourceData as any).studentsJoined?.length > 0 ? (sourceData as any).studentsJoined.length : 1);
   }
 
   return (
@@ -268,7 +267,7 @@ function RideDetailModal({
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-gray-50 px-3 py-3 text-sm font-semibold text-slate-900">
                 <Users className="h-5 w-5 text-emerald-600" />
-                Students: {displayTotal} (👦 {displayBoys} 👧 {displayGirls})
+                Students: {displayTotal} (👦 {displayMales} 👧 {displayFemales})
               </div>
               <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
                 <Bus className="h-5 w-5 text-blue-500" />
@@ -344,6 +343,7 @@ export default function TrackingPage() {
   const [earlyRideRideIds, setEarlyRideRideIds] = useState<Set<string>>(
     new Set(),
   );
+  const [earlyRidesByRideId, setEarlyRidesByRideId] = useState<Record<string, EarlyRideRequest>>({});
 
   const [viewMode, setViewMode] = useState<ViewMode>("live");
   const [rangeStart, setRangeStart] = useState(getDateString(-365));
@@ -541,7 +541,11 @@ export default function TrackingPage() {
             vehicle: req.vehicle,
             boysCount: req.boysCount || 0,
             girlsCount: req.girlsCount || 0,
-          } as RideWithMeta & { vehicle?: any; boysCount?: number; girlsCount?: number };
+            creatorGender: (req as any).creatorGender,
+            requestedBy: (req as any).requestedBy,
+            studentGender: (req as any).studentGender,
+            studentsJoined: (req as any).studentsJoined,
+          } as RideWithMeta & { vehicle?: any; boysCount?: number; girlsCount?: number; creatorGender?: string; requestedBy?: any; studentGender?: string; studentsJoined?: any[] };
         });
 
         const todayEarly = mappedEarly.filter(r => {
@@ -678,8 +682,12 @@ export default function TrackingPage() {
             vehicle: req.vehicle,
             boysCount: req.boysCount || 0,
             girlsCount: req.girlsCount || 0,
-            statusReason: req.statusReason
-          } as RideWithMeta & { vehicle?: any; boysCount?: number; girlsCount?: number; statusReason?: string };
+            statusReason: req.statusReason,
+            creatorGender: (req as any).creatorGender,
+            requestedBy: (req as any).requestedBy,
+            studentGender: (req as any).studentGender,
+            studentsJoined: (req as any).studentsJoined,
+          } as RideWithMeta & { vehicle?: any; boysCount?: number; girlsCount?: number; statusReason?: string; creatorGender?: string; requestedBy?: any; studentGender?: string; studentsJoined?: any[] };
         });
 
         setHistoryRides([...rides, ...mappedEarly]);
@@ -704,6 +712,7 @@ export default function TrackingPage() {
     if (authLoading) return;
     if (!currentUser) {
       setEarlyRideRideIds(new Set());
+      setEarlyRidesByRideId({});
       return;
     }
 
@@ -711,11 +720,16 @@ export default function TrackingPage() {
       collection(db, COLLECTIONS.EARLY_RIDE_REQUESTS),
       (snapshot) => {
         const rideIds = new Set<string>();
+        const requestsByRideId: Record<string, EarlyRideRequest> = {};
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data() as EarlyRideRequest;
-          if (data.rideId) rideIds.add(data.rideId);
+          if (data.rideId) {
+            rideIds.add(data.rideId);
+            requestsByRideId[data.rideId] = data;
+          }
         });
         setEarlyRideRideIds(rideIds);
+        setEarlyRidesByRideId(requestsByRideId);
       },
       (error) => {
         console.error("Early ride requests subscription failed:", error);
@@ -1112,28 +1126,25 @@ export default function TrackingPage() {
 
                   const isActuallyEarlyRide = ride.isEarlyRide || earlyRideRideIds.has(ride.rideId);
 
-                  let displayBoys = 0;
-                  let displayGirls = 0;
-                  let displayTotal = 1;
+                  let displayMales = (ride as any).maleCount || 0;
+                  let displayFemales = (ride as any).femaleCount || 0;
+                  let displayTotal = (ride as any).totalStudents || 1;
 
                   if (isActuallyEarlyRide) {
-                    let calculatedMales = 0;
-                    let calculatedFemales = 0;
-                    const studentsList = Array.isArray((ride as any).studentsJoined) ? (ride as any).studentsJoined : [];
+                    const sourceData = (ride.rideId && earlyRidesByRideId?.[ride.rideId]) ? earlyRidesByRideId[ride.rideId] : ride;
 
-                    studentsList.forEach((s: any) => {
-                      const studentId = typeof s === 'string' ? s : (s.id || s.studentId);
-                      // Use the globally fetched dictionary here!
-                      const profile = allStudentsById?.[studentId] || s; 
-                      const gender = (profile as any)?.gender?.toLowerCase();
+                    displayMales = (sourceData as any).boysCount || 0;
+                    displayFemales = (sourceData as any).girlsCount || 0;
 
-                      if (gender === 'male') calculatedMales++;
-                      if (gender === 'female') calculatedFemales++;
-                    });
-
-                    displayBoys = (ride as any).maleCount ?? calculatedMales;
-                    displayGirls = (ride as any).femaleCount ?? calculatedFemales;
-                    displayTotal = (ride as any).totalStudents ?? (studentsList.length > 0 ? studentsList.length : Math.max(1, displayBoys + displayGirls));
+                    if (displayMales === 0 && displayFemales === 0 && (sourceData.status === 'withdrawn' || sourceData.status === 'cancelled' || !(sourceData as any).studentsJoined || (sourceData as any).studentsJoined?.length === 0)) {
+                        const creatorGender = (sourceData as any).creatorGender || (sourceData as any).requestedBy?.gender?.toLowerCase() || (sourceData as any).studentGender?.toLowerCase();
+                        if (creatorGender === 'female' || creatorGender === 'girl') {
+                            displayFemales = 1;
+                        } else {
+                            displayMales = 1; 
+                        }
+                    }
+                    displayTotal = (sourceData as any).totalStudents || ((sourceData as any).studentsJoined?.length > 0 ? (sourceData as any).studentsJoined.length : 1);
                   }
 
                   return (
@@ -1210,7 +1221,7 @@ export default function TrackingPage() {
                                   <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded-md">
                                     <Users className="w-4 h-4" />
                                     <span>
-                                      Students: {displayTotal} (👦 {displayBoys} 👧 {displayGirls})
+                                      Students: {displayTotal} (👦 {displayMales} 👧 {displayFemales})
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded-md">
@@ -1261,28 +1272,25 @@ export default function TrackingPage() {
                   
                   const isActuallyEarlyRide = ride.isEarlyRide || earlyRideRideIds.has(ride.rideId);
 
-                  let displayBoys = 0;
-                  let displayGirls = 0;
-                  let displayTotal = 1;
+                  let displayMales = (ride as any).maleCount || 0;
+                  let displayFemales = (ride as any).femaleCount || 0;
+                  let displayTotal = (ride as any).totalStudents || 1;
 
                   if (isActuallyEarlyRide) {
-                    let calculatedMales = 0;
-                    let calculatedFemales = 0;
-                    const studentsList = Array.isArray((ride as any).studentsJoined) ? (ride as any).studentsJoined : [];
+                    const sourceData = (ride.rideId && earlyRidesByRideId?.[ride.rideId]) ? earlyRidesByRideId[ride.rideId] : ride;
 
-                    studentsList.forEach((s: any) => {
-                      const studentId = typeof s === 'string' ? s : (s.id || s.studentId);
-                      // Use the globally fetched dictionary here!
-                      const profile = allStudentsById?.[studentId] || s; 
-                      const gender = (profile as any)?.gender?.toLowerCase();
+                    displayMales = (sourceData as any).boysCount || 0;
+                    displayFemales = (sourceData as any).girlsCount || 0;
 
-                      if (gender === 'male') calculatedMales++;
-                      if (gender === 'female') calculatedFemales++;
-                    });
-
-                    displayBoys = (ride as any).maleCount ?? calculatedMales;
-                    displayGirls = (ride as any).femaleCount ?? calculatedFemales;
-                    displayTotal = (ride as any).totalStudents ?? (studentsList.length > 0 ? studentsList.length : Math.max(1, displayBoys + displayGirls));
+                    if (displayMales === 0 && displayFemales === 0 && (sourceData.status === 'withdrawn' || sourceData.status === 'cancelled' || !(sourceData as any).studentsJoined || (sourceData as any).studentsJoined?.length === 0)) {
+                        const creatorGender = (sourceData as any).creatorGender || (sourceData as any).requestedBy?.gender?.toLowerCase() || (sourceData as any).studentGender?.toLowerCase();
+                        if (creatorGender === 'female' || creatorGender === 'girl') {
+                            displayFemales = 1;
+                        } else {
+                            displayMales = 1; 
+                        }
+                    }
+                    displayTotal = (sourceData as any).totalStudents || ((sourceData as any).studentsJoined?.length > 0 ? (sourceData as any).studentsJoined.length : 1);
                   }
 
                   return (
@@ -1373,7 +1381,7 @@ export default function TrackingPage() {
                             <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded-md">
                               <Users className="w-4 h-4" />
                               <span>
-                                Students: {displayTotal} (👦 {displayBoys} 👧 {displayGirls})
+                                Students: {displayTotal} (👦 {displayMales} 👧 {displayFemales})
                               </span>
                             </div>
                             <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded-md">
@@ -1458,6 +1466,7 @@ export default function TrackingPage() {
         driverProfile={selectedRide ? allDriversById[(selectedRide as any).driverId || selectedRide.assignedDriverId] : null}
         allUsersById={allDriversById}
         allStudentsById={allStudentsById}
+        earlyRidesByRideId={earlyRidesByRideId}
         onClose={() => setSelectedRide(null)}
         onGoLive={() => selectedRide && goLive(selectedRide)}
       />

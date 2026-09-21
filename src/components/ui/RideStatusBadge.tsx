@@ -22,7 +22,7 @@ export function RideStatusBadge({
     );
   }
 
-  if (s === "accepted") {
+  if (s === "accepted" || s === "completed") {
     return (
       <span
         className={cn(
@@ -30,7 +30,7 @@ export function RideStatusBadge({
           className
         )}
       >
-        Accepted
+        {s === "completed" ? "Completed" : "Accepted"}
       </span>
     );
   }
@@ -45,19 +45,6 @@ export function RideStatusBadge({
       >
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
         Active
-      </span>
-    );
-  }
-
-  if (s === "completed") {
-    return (
-      <span
-        className={cn(
-          "inline-flex items-center rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700",
-          className
-        )}
-      >
-        Completed
       </span>
     );
   }

@@ -119,18 +119,6 @@ function RideDetailModal({
   const todayDateString = new Date().toISOString().split('T')[0];
   let displayStatus = (ride.date < todayDateString && (ride.status === 'active' || ride.status === 'scheduled')) ? 'cancelled' : ride.status;
 
-  const isActuallyEarlyRide = Boolean(
-    ride.isEarlyRide || 
-    (ride as any).source === 'earlyRideSharing' || 
-    (ride as any).rideType === 'early' || 
-    (ride as any).collectionSource === 'EARLY_RIDE_REQUESTS' ||
-    Array.isArray((ride as any).studentsJoined)
-  );
-
-  if (isActuallyEarlyRide && (displayStatus === 'scheduled' || displayStatus === 'accepted')) {
-    displayStatus = 'accepted';
-  }
-
   const driverProfile = studentsById.get(ride.assignedDriverId);
 
   return (
@@ -182,35 +170,7 @@ function RideDetailModal({
           </div>
         </div>
 
-        {isActuallyEarlyRide ? (() => {
-          let displayBoys = (ride as any).boysCount || 0;
-          let displayGirls = (ride as any).girlsCount || 0;
-
-          if (displayBoys === 0 && displayGirls === 0 && (ride.status === 'withdrawn' || ride.status === 'cancelled' || (ride as any).studentsJoined?.length === 0)) {
-             const creatorGender = (ride as any).creatorGender || (ride as any).requestedBy?.gender?.toLowerCase() || (ride as any).studentGender?.toLowerCase();
-             if (creatorGender === 'female' || creatorGender === 'girl') {
-                 displayGirls = 1;
-             } else {
-                 displayBoys = 1; 
-             }
-          }
-
-          const displayTotal = (ride as any).totalStudents || ((ride as any).studentsJoined?.length > 0 ? (ride as any).studentsJoined.length : 1);
-
-          return (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-gray-50 px-3 py-3 text-sm font-semibold text-slate-900">
-                <Users className="h-5 w-5 text-emerald-600" />
-                Students: {displayTotal} (👦 {displayBoys} 👧 {displayGirls})
-              </div>
-              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
-                <Bus className="h-5 w-5 text-blue-500" />
-                Vehicle: {(ride as any).vehicle?.name || (ride as any).vehicleType || "TBD"} - {(ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || "TBD"}
-              </div>
-            </div>
-          );
-        })() : (
-          <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3">
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex justify-between items-center px-1">
                 <div className="flex flex-col items-center">
@@ -238,7 +198,6 @@ function RideDetailModal({
               Vehicle: {driverProfile?.vehicleType || (ride as any).vehicle?.name || (ride as any).vehicleType || "TBD"} - {driverProfile?.vehiclePlate || (ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || "TBD"}
             </div>
           </div>
-        )}
       </div>
     </Modal>
   );
@@ -276,9 +235,6 @@ export default function RidesPage() {
   const [allRides, setAllRides] = useState<RideWithMeta[]>([]);
   const [isAllRidesLoading, setIsAllRidesLoading] = useState(true);
   const [allAvailabilityRecords, setAllAvailabilityRecords] = useState<Availability[]>([]);
-  const [earlyRideRideIds, setEarlyRideRideIds] = useState<Set<string>>(
-    new Set(),
-  );
 
   const [rangeStart, setRangeStart] = useState(getDateString(-7));
   const [rangeEnd, setRangeEnd] = useState(getDateString(7));
@@ -390,96 +346,27 @@ export default function RidesPage() {
 
   useEffect(() => {
     setIsTodayRidesLoading(true);
-    let regularRides: RideWithMeta[] = [];
-    let earlyRides: EarlyRideRequest[] = [];
-    let loadedRegular = false;
-    let loadedEarly = false;
-
-    const updateMerged = () => {
-      if (loadedRegular && loadedEarly) {
-        const mappedEarly: RideWithMeta[] = earlyRides.filter(req => !req.rideId).map(req => {
-          let mappedStatus = req.status as any;
-          if (mappedStatus === "accepted") mappedStatus = "active";
-          if (mappedStatus === "waiting" || mappedStatus === "active") {
-            const d = req.createdAt?.toDate();
-            if (d) {
-              const offset = d.getTimezoneOffset() * 60000;
-              const dateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
-              if (dateStr < todayString) {
-                mappedStatus = "completed";
-              }
-            }
-          }
-
-          return {
-            rideId: req.requestId,
-            routeId: req.route,
-            routeName: req.route,
-            assignedDriverId: req.acceptedDriverId || "",
-            driverName: "Early Ride Driver",
-            date: todayString,
-            departureTime: req.createdAt ? formatTimeTo12Hour(req.createdAt.toDate()) : "TBD",
-            status: mappedStatus,
-            boardedCount: req.studentsJoined ? req.studentsJoined.length : 0,
-            studentIds: req.studentsJoined ? req.studentsJoined.map(s => s.studentId) : [],
-            createdAt: req.createdAt,
-            isEarlyRide: true,
-            vehicle: req.vehicle,
-            boysCount: req.boysCount || 0,
-            girlsCount: req.girlsCount || 0,
-          } as RideWithMeta & { vehicle?: any; boysCount?: number; girlsCount?: number };
-        });
-
-        const todayEarly = mappedEarly.filter(r => {
-           if (!r.createdAt) return false;
-           const d = r.createdAt.toDate();
-           const offset = d.getTimezoneOffset() * 60000;
-           return new Date(d.getTime() - offset).toISOString().split('T')[0] === todayString;
-        });
-
-        setTodayRides([...regularRides, ...todayEarly]);
-        setIsTodayRidesLoading(false);
-      }
-    };
 
     const unsubRegular = onSnapshot(
       query(collection(db, COLLECTIONS.RIDES), where("date", "==", todayString)),
       (snapshot) => {
-        regularRides = snapshot.docs.map((rideDoc) => ({
+        const regularRides = snapshot.docs.map((rideDoc) => ({
           ...(rideDoc.data() as RideWithMeta),
           rideId: rideDoc.id,
-        }));
-        loadedRegular = true;
-        updateMerged();
+        })).filter(ride => 
+          !(ride.isEarlyRide || (ride as any).source === 'earlyRideSharing' || (ride as any).rideType === 'early' || (ride as any).collectionSource === 'EARLY_RIDE_REQUESTS')
+        );
+        setTodayRides(regularRides);
+        setIsTodayRidesLoading(false);
       },
       (error) => {
         console.error("Error fetching today's rides:", error);
         toast.error("Failed to load today's rides");
-        loadedRegular = true;
-        updateMerged();
+        setIsTodayRidesLoading(false);
       }
     );
 
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const unsubEarly = onSnapshot(
-      query(collection(db, COLLECTIONS.EARLY_RIDE_REQUESTS), where("createdAt", ">=", Timestamp.fromDate(todayStart))),
-      (snapshot) => {
-        earlyRides = snapshot.docs.map((doc) => ({ ...doc.data(), requestId: doc.id } as EarlyRideRequest));
-        loadedEarly = true;
-        updateMerged();
-      },
-      (error) => {
-        console.error("Error fetching today's early rides:", error);
-        loadedEarly = true;
-        updateMerged();
-      }
-    );
-
-    return () => {
-      unsubRegular();
-      unsubEarly();
-    };
+    return () => unsubRegular();
   }, [todayString]);
 
   useEffect(() => {
@@ -500,53 +387,6 @@ export default function RidesPage() {
 
   useEffect(() => {
     setIsAllRidesLoading(true);
-    let regularRides: RideWithMeta[] = [];
-    let earlyRides: EarlyRideRequest[] = [];
-    let loadedRegular = false;
-    let loadedEarly = false;
-
-    const updateMerged = () => {
-      if (loadedRegular && loadedEarly) {
-        const mappedEarly: RideWithMeta[] = earlyRides.filter(req => !req.rideId).map(req => {
-          let dateStr = "";
-          if (req.createdAt) {
-            const d = req.createdAt.toDate();
-            const offset = d.getTimezoneOffset() * 60000;
-            dateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
-          }
-
-          let mappedStatus = req.status as any;
-          if (mappedStatus === "accepted") mappedStatus = "active";
-          if (mappedStatus === "waiting" || mappedStatus === "active") {
-            const todayStr = new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0];
-            if (dateStr && dateStr < todayStr) {
-              mappedStatus = "completed";
-            }
-          }
-
-          return {
-            rideId: req.requestId,
-            routeId: req.route,
-            routeName: req.route,
-            assignedDriverId: req.acceptedDriverId || "",
-            driverName: "Early Ride Driver",
-            date: dateStr,
-            departureTime: req.createdAt ? formatTimeTo12Hour(req.createdAt.toDate()) : "TBD",
-            status: mappedStatus,
-            boardedCount: req.studentsJoined ? req.studentsJoined.length : 0,
-            studentIds: req.studentsJoined ? req.studentsJoined.map(s => s.studentId) : [],
-            createdAt: req.createdAt,
-            isEarlyRide: true,
-            vehicle: req.vehicle,
-            boysCount: req.boysCount || 0,
-            girlsCount: req.girlsCount || 0,
-          } as RideWithMeta & { vehicle?: any; boysCount?: number; girlsCount?: number };
-        });
-
-        setAllRides([...regularRides, ...mappedEarly]);
-        setIsAllRidesLoading(false);
-      }
-    };
 
     const unsubRegular = onSnapshot(
       query(
@@ -555,46 +395,23 @@ export default function RidesPage() {
         where("date", "<=", rangeEnd),
       ),
       (snapshot) => {
-        regularRides = snapshot.docs.map((rideDoc) => ({
+        const regularRides = snapshot.docs.map((rideDoc) => ({
           ...(rideDoc.data() as RideWithMeta),
           rideId: rideDoc.id,
-        }));
-        loadedRegular = true;
-        updateMerged();
+        })).filter(ride => 
+          !(ride.isEarlyRide || (ride as any).source === 'earlyRideSharing' || (ride as any).rideType === 'early' || (ride as any).collectionSource === 'EARLY_RIDE_REQUESTS')
+        );
+        setAllRides(regularRides);
+        setIsAllRidesLoading(false);
       },
       (error) => {
         console.error("Error fetching rides:", error);
         toast.error("Failed to load rides table");
-        loadedRegular = true;
-        updateMerged();
+        setIsAllRidesLoading(false);
       }
     );
 
-    const startTimestamp = Timestamp.fromDate(new Date(`${rangeStart}T00:00:00`));
-    const endTimestamp = Timestamp.fromDate(new Date(`${rangeEnd}T23:59:59.999`));
-    
-    const unsubEarly = onSnapshot(
-      query(
-        collection(db, COLLECTIONS.EARLY_RIDE_REQUESTS),
-        where("createdAt", ">=", startTimestamp),
-        where("createdAt", "<=", endTimestamp)
-      ),
-      (snapshot) => {
-        earlyRides = snapshot.docs.map(doc => ({ ...doc.data(), requestId: doc.id } as EarlyRideRequest));
-        loadedEarly = true;
-        updateMerged();
-      },
-      (error) => {
-        console.error("Error fetching early rides:", error);
-        loadedEarly = true;
-        updateMerged();
-      }
-    );
-
-    return () => {
-      unsubRegular();
-      unsubEarly();
-    };
+    return () => unsubRegular();
   }, [rangeEnd, rangeStart]);
 
   useEffect(() => {
@@ -614,22 +431,7 @@ export default function RidesPage() {
     return () => unsubscribe();
   }, [rangeEnd, rangeStart]);
 
-  useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, COLLECTIONS.EARLY_RIDE_REQUESTS),
-      (snapshot) => {
-        const rideIds = new Set<string>();
-        snapshot.docs.forEach((docSnap) => {
-          const data = docSnap.data() as EarlyRideRequest;
-          if (data.rideId) rideIds.add(data.rideId);
-        });
-        setEarlyRideRideIds(rideIds);
-      },
-      () => {},
-    );
 
-    return () => unsubscribe();
-  }, []);
 
   const filteredAllRides = useMemo(() => {
     return allRides
@@ -680,10 +482,9 @@ export default function RidesPage() {
       const todayDateString = new Date().toISOString().split('T')[0];
       const displayStatus = (ride.date < todayDateString && (ride.status === 'active' || ride.status === 'scheduled')) ? 'cancelled' : ride.status;
 
-      const isEarly = ride.isEarlyRide || earlyRideRideIds.has(ride.rideId);
-      const availableCountVal = isEarly ? ((ride as any).boardedCount || 1) : stats.availableCount;
-      const notAvailableCountVal = isEarly ? 0 : stats.notAvailableCount;
-      const noResponseCountVal = isEarly ? 0 : stats.noResponseCount;
+      const availableCountVal = stats.availableCount;
+      const notAvailableCountVal = stats.notAvailableCount;
+      const noResponseCountVal = stats.noResponseCount;
 
       return [
         ride.date,
@@ -718,7 +519,7 @@ export default function RidesPage() {
   const handleMarkCompleted = async (ride: RideWithMeta) => {
     setIsMarkingCompleted(true);
     try {
-      const collectionName = ride.isEarlyRide ? COLLECTIONS.EARLY_RIDE_REQUESTS : COLLECTIONS.RIDES;
+      const collectionName = COLLECTIONS.RIDES;
       await updateDoc(doc(db, collectionName, ride.rideId), {
         status: "completed",
         completedAt: serverTimestamp(),
@@ -738,7 +539,7 @@ export default function RidesPage() {
 
     setIsCancelling(true);
     try {
-      const collectionName = cancelRideTarget.isEarlyRide ? COLLECTIONS.EARLY_RIDE_REQUESTS : COLLECTIONS.RIDES;
+      const collectionName = COLLECTIONS.RIDES;
       await updateDoc(doc(db, collectionName, cancelRideTarget.rideId), {
         status: "cancelled",
         cancelledAt: serverTimestamp(),
@@ -905,7 +706,7 @@ export default function RidesPage() {
                   <RideCard
                     key={ride.rideId}
                     ride={enrichedRide as any}
-                    isEarlyRide={ride.isEarlyRide || earlyRideRideIds.has(ride.rideId)}
+                    isEarlyRide={false}
                     availableStudentsCount={stats.availableCount}
                     notAvailableStudentsCount={stats.notAvailableCount}
                     noResponseCount={stats.noResponseCount}
@@ -1029,8 +830,6 @@ export default function RidesPage() {
                   const studentIds = route?.studentIds || [];
                   const stats = getStudentAvailabilityStats(studentIds, ride.routeId, allAvailabilityMap, ride.date);
                   const availableCount = stats.availableCount;
-                  const isEarlyRow = Boolean(ride.isEarlyRide || earlyRideRideIds.has(ride.rideId) || (ride as any).source === 'earlyRideSharing' || (ride as any).rideType === 'early');
-
                   return (
                     <tr
                       key={ride.rideId}
@@ -1045,17 +844,9 @@ export default function RidesPage() {
                       className="cursor-pointer transition hover:bg-slate-50"
                     >
                       <td className="px-4 py-3 text-sm font-semibold text-slate-900">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-semibold text-slate-900">
-                            {ride.routeName}
-                          </span>
-                          {isEarlyRow ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <Zap fill="currentColor" size={12} />
-                              Early Ride
-                            </span>
-                          ) : null}
-                        </div>
+                        <span className="font-semibold text-slate-900">
+                          {ride.routeName}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         <div className="flex items-center gap-2">
@@ -1075,12 +866,10 @@ export default function RidesPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
-                        <RideStatusBadge status={isEarlyRow && (ride.status === 'scheduled' || ride.status === 'accepted') ? 'accepted' : ride.status} />
+                        <RideStatusBadge status={ride.status} />
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
-                        {isEarlyRow
-                          ? ((ride as any).totalStudents ?? (ride as any).studentsJoined?.length ?? 0) 
-                          : (availableCount ?? 0)}
+                        {availableCount ?? 0}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         <div
