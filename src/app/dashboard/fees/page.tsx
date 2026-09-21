@@ -49,6 +49,7 @@ import PaymentCard from "@/components/fees/PaymentCard";
 import ReceiptModal from "@/components/fees/ReceiptModal";
 import RevenueChart from "@/components/fees/RevenueChart";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import FeeStatusBadge from "@/components/ui/FeeStatusBadge";
 import { format, subMonths, addMonths } from "date-fns";
 
 type TabType = 'all' | 'pending' | 'paid' | 'unpaid' | 'exempt';
@@ -67,31 +68,6 @@ type NormalizedFeePayment = FeePayment & {
   fareAmount?: number;
 };
 
-const getStatusDisplayText = (status: string, method?: string, isExempt?: boolean) => {
-  if (isExempt || status.toLowerCase() === "exempt") return "Exempt";
-
-  const isOnline =
-    method?.toLowerCase().includes("card") ||
-    method?.toLowerCase().includes("paddle");
-
-  if (status.toLowerCase() === "verified" || status.toLowerCase() === "paid") {
-    return isOnline ? "Paid" : "Verified";
-  }
-
-  if (
-    status.toLowerCase() === "pending" ||
-    status.toLowerCase() === "due" ||
-    status.toLowerCase() === "unpaid"
-  ) {
-    return "Unpaid";
-  }
-
-  if (status.toLowerCase() === "submitted") {
-    return isOnline ? "Unpaid" : "Pending";
-  }
-
-  return status.charAt(0).toUpperCase() + status.slice(1);
-};
 
 function normalizeFeePaymentRecord(
   raw: Partial<FeePayment> & { fareAmount?: number },
@@ -716,22 +692,6 @@ export default function FeesPage() {
     }
   };
 
-  const getStatusBadgeClass = (payment: FeePayment) => {
-    if (payment.feeExempt) {
-      return "bg-violet-100 text-violet-800";
-    }
-
-    switch (normalizeFeeStatus(payment.paymentStatus)) {
-      case "verified":
-        return "bg-green-100 text-green-800";
-      case "submitted":
-        return "bg-orange-100 text-orange-800";
-      case "pending":
-        return "bg-red-100 text-red-800";
-      default:
-        return "bg-slate-100 text-slate-800";
-    }
-  };
 
   if (loading) {
     return (
@@ -1077,17 +1037,11 @@ export default function FeesPage() {
                             {formatPKR(globalMonthlyFee)}
                           </td>
                           <td className="px-4 py-3">
-                            <span
-                              className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${getStatusBadgeClass(
-                                payment,
-                              )}`}
-                            >
-                              {getStatusDisplayText(
-                                payment.paymentStatus,
-                                payment.paymentMethod,
-                                payment.feeExempt
-                              )}
-                            </span>
+                            <FeeStatusBadge
+                              status={payment.paymentStatus}
+                              method={payment.paymentMethod}
+                              isExempt={payment.feeExempt}
+                            />
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {formatTimestamp(payment.submittedAt)}
@@ -1187,13 +1141,11 @@ export default function FeesPage() {
                           <td className="px-4 py-3 text-slate-600">{formatPaymentMethod(payment.paymentMethod)}</td>
                           <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatPKR(globalMonthlyFee)}</td>
                           <td className="px-4 py-3">
-                            <span className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${getStatusBadgeClass(payment)}`}>
-                              {getStatusDisplayText(
-                                payment.paymentStatus,
-                                payment.paymentMethod,
-                                payment.feeExempt
-                              )}
-                            </span>
+                            <FeeStatusBadge
+                              status={payment.paymentStatus}
+                              method={payment.paymentMethod}
+                              isExempt={payment.feeExempt}
+                            />
                           </td>
                           <td className="px-4 py-3 text-slate-600">{formatTimestamp(payment.submittedAt)}</td>
                           <td className="px-4 py-3 text-slate-600">{payment.verifiedAt ? formatTimestamp(payment.verifiedAt) : "—"}</td>

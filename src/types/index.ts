@@ -76,7 +76,7 @@ export interface Ride {
   date: string; // YYYY-MM-DD format — critical, must match mobile app
   departureTime: string;
   returnTime?: string;
-  status: "scheduled" | "active" | "completed" | "cancelled" | "auto_cancelled" | "delayed" | "no_show";
+  status: "scheduled" | "active" | "completed" | "cancelled" | "auto_cancelled" | "delayed" | "no_show" | "withdrawn" | "waiting" | "rejected" | "expired" | "accepted";
   boardedCount: number;
   studentIds: string[];
   completedStops?: (string | number)[];
@@ -98,6 +98,8 @@ export interface EarlyRideRequest {
   boysCount: number;
   girlsCount: number;
   status: "waiting" | "accepted" | "completed" | "cancelled" | "expired";
+  statusReason?: string;
+  creatorId?: string;
   assignedDriverIds: string[];
   acceptedDriverId: string | null;
   vehicle: { name: string; plateNumber: string } | null;

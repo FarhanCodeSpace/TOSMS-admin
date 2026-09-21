@@ -25,6 +25,7 @@ import { formatTimestamp } from "@/utils/formatters";
 import type { EarlyRideRequest, Ride, User, Route } from "@/types";
 import StudentDetailModal from "@/app/dashboard/students/StudentDetailModal";
 import DriverDetailModal from "@/components/drivers/DriverDetailModal";
+import { RideStatusBadge } from "@/components/ui/RideStatusBadge";
 
 type EarlyRideRequestRecord = EarlyRideRequest & { id: string };
 
@@ -33,8 +34,9 @@ type EarlyRideDisplayStatus =
   | "accepted"
   | "active"
   | "completed"
-  | "cancelled";
-
+  | "cancelled"
+  | "rejected"
+  | "withdrawn";
 
 
 type StatusFilter = "all" | EarlyRideDisplayStatus;
@@ -52,51 +54,22 @@ function toDate(value: SnapshotTimestamp): Date | null {
 
 function getDisplayStatus(
   request: EarlyRideRequestRecord,
-  rideStatus?: Ride["status"],
+  rideStatus?: Ride["status"] | "withdrawn" | "rejected",
 ): EarlyRideDisplayStatus {
-  if (request.status === "cancelled" || request.status === "expired") {
-    return "cancelled";
-  }
-
-  if (rideStatus === "completed") {
-    return "completed";
-  }
-
-  if (rideStatus === "active") {
-    return "active";
-  }
-
-  if (rideStatus === "cancelled") {
-    return "cancelled";
-  }
-
-  if (request.status === "completed") {
-    return "completed";
-  }
-
-  if (request.status === "accepted") {
-    return "accepted";
-  }
-
+  if (rideStatus === "completed") return "completed";
+  if (rideStatus === "active") return "active";
+  if (rideStatus === "cancelled") return "cancelled";
+  if (rideStatus === "rejected") return "rejected";
+  if (rideStatus === "withdrawn") return "withdrawn";
+  if (request.status === "cancelled") return "cancelled";
+  if (request.status === "rejected" as any) return "rejected";
+  if (request.status === "withdrawn" as any) return "withdrawn";
+  if (request.status === "completed") return "completed";
+  if (request.status === "accepted") return "accepted";
   return "waiting";
 }
 
-function getStatusBadgeProps(status: EarlyRideDisplayStatus) {
-  switch (status) {
-    case "waiting":
-      return { variant: "warning" as const, label: "Waiting" };
-    case "accepted":
-      return { variant: "success" as const, label: "Accepted" };
-    case "active":
-      return { variant: "active" as const, label: "Active" };
-    case "completed":
-      return { variant: "success" as const, label: "Completed" };
-    case "cancelled":
-      return { variant: "error" as const, label: "Cancelled" };
-    default:
-      return { variant: "default" as const, label: status };
-  }
-}
+
 
 function RequestDetails({
   request,
@@ -115,9 +88,10 @@ function RequestDetails({
   onViewStudent: (student: User) => void;
   onViewDriver: (driver: User) => void;
 }) {
+  const ride = request as any;
+  const resolvedDriverId = ride.driverId || request.acceptedDriverId;
   const driverLabel =
-    driver?.fullName ?? request.acceptedDriverId ?? "Unassigned";
-  const statusBadge = getStatusBadgeProps(status);
+    driver?.fullName ?? resolvedDriverId ?? "Unassigned";
   const vehicleLabel = request.vehicle
     ? `${request.vehicle.name} • ${request.vehicle.plateNumber}`
     : driver
@@ -130,7 +104,7 @@ function RequestDetails({
   return (
     <div className="space-y-5">
       <div className="flex justify-end">
-        <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
+        <RideStatusBadge status={status} />
       </div>
 
       <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-secondary)] p-4 md:grid-cols-2">
@@ -227,15 +201,54 @@ function RequestDetails({
             Students Joined
           </h3>
           <span className="text-xs font-medium text-[var(--text-muted)]">
-            {request.studentsJoined.length} total
+            {(() => {
+              const ride = request as any;
+              let displayBoys = ride.boysCount || 0;
+              let displayGirls = ride.girlsCount || 0;
+
+              if (displayBoys === 0 && displayGirls === 0 && (ride.status === 'withdrawn' || ride.status === 'cancelled' || ride.studentsJoined?.length === 0)) {
+                 const creatorGender = ride.creatorGender || ride.requestedBy?.gender?.toLowerCase() || ride.studentGender?.toLowerCase();
+                 if (creatorGender === 'female' || creatorGender === 'girl') {
+                     displayGirls = 1;
+                 } else {
+                     displayBoys = 1; 
+                 }
+              }
+
+              const displayTotal = ride.totalStudents || (ride.studentsJoined?.length > 0 ? ride.studentsJoined.length : 1);
+              return `${displayTotal} total (👦 ${displayBoys} 👧 ${displayGirls})`;
+            })()}
           </span>
         </div>
 
-        {request.studentsJoined.length === 0 ? (
-          <p className="mt-3 text-sm text-[var(--text-muted)]">
-            No students have joined this request yet.
-          </p>
-        ) : (
+        {request.studentsJoined.length === 0 ? (() => {
+          const ride = request as any;
+          const studentData = ride.creatorId ? studentsById[ride.creatorId] : null;
+          const mappedName = studentData ? (studentData as any).name || (studentData as any).fullName || (studentData as any).firstName : null;
+          const requesterName = mappedName || ride.creatorName || ride.studentName || ride.requestedBy?.name;
+
+          return requesterName ? (
+            <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+              <div className="flex items-center justify-between rounded-xl border border-[var(--border)] px-3 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--text)]">
+                    {requesterName}
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                    {request.university}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge variant="info">Original Requester</Badge>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-[var(--text-muted)]">
+              No students have joined this request yet.
+            </p>
+          );
+        })() : (
           <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
             {request.studentsJoined.map((student) => (
               <div
@@ -482,6 +495,8 @@ export default function EarlyRideSharingPage() {
       active: requestsWithDisplayStatus.filter(({ displayStatus }) => displayStatus === "active").length,
       completed: requestsWithDisplayStatus.filter(({ displayStatus }) => displayStatus === "completed").length,
       cancelled: requestsWithDisplayStatus.filter(({ displayStatus }) => displayStatus === "cancelled").length,
+      rejected: requestsWithDisplayStatus.filter(({ displayStatus }) => displayStatus === "rejected").length,
+      withdrawn: requestsWithDisplayStatus.filter(({ displayStatus }) => displayStatus === "withdrawn").length,
     };
   }, [requests.length, requestsWithDisplayStatus]);
 
@@ -505,6 +520,8 @@ export default function EarlyRideSharingPage() {
             ["active", "Active"],
             ["completed", "Completed"],
             ["cancelled", "Cancelled"],
+            ["rejected", "Rejected"],
+            ["withdrawn", "Withdrawn"],
           ] as const).map(([key, label]) => {
             const active = activeFilter === key;
             const badgeValue = counts[key as keyof typeof counts];
@@ -571,10 +588,11 @@ export default function EarlyRideSharingPage() {
                 </tr>
               ) : (
                 filteredRequests.map(({ request, displayStatus }) => {
-                  const driver = request.acceptedDriverId
-                    ? driversById[request.acceptedDriverId]
+                  const rideData = request as any;
+                  const resolvedDriverId = rideData.driverId || request.acceptedDriverId;
+                  const driver = resolvedDriverId
+                    ? driversById[resolvedDriverId]
                     : undefined;
-                  const statusBadge = getStatusBadgeProps(displayStatus);
 
                   return (
                     <tr
@@ -592,11 +610,11 @@ export default function EarlyRideSharingPage() {
                     >
                       <td className="whitespace-nowrap px-4 py-4 text-sm font-semibold text-[var(--text)]">
                         {(() => {
-                          const primaryStudent = request.studentsJoined?.[0]?.name || "Unknown Student";
-                          const extraCount = Math.max(0, (request.studentsJoined?.length || 0) - 1);
-                          return extraCount > 0 
-                            ? `${primaryStudent} + ${extraCount} other${extraCount > 1 ? "s" : ""}`
-                            : primaryStudent;
+                          const ride = request as any;
+                          const studentData = ride.creatorId ? studentsById[ride.creatorId] : null;
+                          const mappedName = studentData ? (studentData as any).name || (studentData as any).fullName || (studentData as any).firstName : null;
+                          const requesterName = ride.studentsJoined?.[0]?.name || mappedName || ride.creatorName || ride.student?.name || ride.user?.name || ride.requestedBy?.name || ride.studentName || 'Unknown Student';
+                          return requesterName;
                         })()}
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-sm text-[var(--text)]">
@@ -606,18 +624,38 @@ export default function EarlyRideSharingPage() {
                         {request.university}
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-sm text-[var(--text)]">
-                        <div>{request.studentsJoined.length} total</div>
-                        <div className="mt-0.5 text-xs text-[var(--text-muted)] flex items-center gap-1.5">
-                          <span className="flex items-center gap-1">
-                            <UserIcon className="h-3.5 w-3.5 text-blue-500" />
-                            <span>{request.boysCount} males</span>
-                          </span>
-                          <span className="text-slate-300">|</span>
-                          <span className="flex items-center gap-1">
-                            <UserIcon className="h-3.5 w-3.5 text-pink-500" />
-                            <span>{request.girlsCount} females</span>
-                          </span>
-                        </div>
+                        {(() => {
+                          const ride = request as any;
+                          let displayBoys = ride.boysCount || 0;
+                          let displayGirls = ride.girlsCount || 0;
+
+                          if (displayBoys === 0 && displayGirls === 0 && (ride.status === 'withdrawn' || ride.status === 'cancelled' || ride.studentsJoined?.length === 0)) {
+                             const creatorGender = ride.creatorGender || ride.requestedBy?.gender?.toLowerCase() || ride.studentGender?.toLowerCase();
+                             if (creatorGender === 'female' || creatorGender === 'girl') {
+                                 displayGirls = 1;
+                             } else {
+                                 displayBoys = 1; 
+                             }
+                          }
+
+                          const displayTotal = ride.totalStudents || (ride.studentsJoined?.length > 0 ? ride.studentsJoined.length : 1);
+                          return (
+                            <>
+                              <div>{displayTotal} total</div>
+                              <div className="mt-0.5 text-xs text-[var(--text-muted)] flex items-center gap-1.5">
+                                <span className="flex items-center gap-1">
+                                  <UserIcon className="h-3.5 w-3.5 text-blue-500" />
+                                  <span>{displayBoys} males</span>
+                                </span>
+                                <span className="text-slate-300">|</span>
+                                <span className="flex items-center gap-1">
+                                  <UserIcon className="h-3.5 w-3.5 text-pink-500" />
+                                  <span>{displayGirls} females</span>
+                                </span>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-sm text-[var(--text)]">
                         {driver?.fullName || request.acceptedDriverId || "Unassigned"}
@@ -630,7 +668,7 @@ export default function EarlyRideSharingPage() {
                             : "N/A"}
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-sm">
-                        <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
+                        <RideStatusBadge status={request.status} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-sm text-[var(--text-muted)]">
                         {toDate(request.createdAt)

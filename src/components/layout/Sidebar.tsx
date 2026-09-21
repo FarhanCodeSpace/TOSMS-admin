@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Bus,
   Calendar,
-  Clock,
+  Zap,
   ChevronLeft,
   ChevronRight,
   CreditCard,
@@ -57,7 +57,7 @@ const navigationSections = [
       {
         label: "Early Ride Sharing",
         href: "/dashboard/early-ride-sharing",
-        icon: Clock,
+        icon: Zap,
       },
       { label: "Live Tracking", href: "/dashboard/tracking", icon: Map },
       { label: "Reviews", href: "/dashboard/reviews", icon: Star },
@@ -278,7 +278,7 @@ export default function Sidebar({
               size="sm"
               leftIcon={<LogOut className="h-4 w-4" />}
               className={cn(
-                "w-full justify-start",
+                "w-full justify-start hover:bg-red-50 hover:text-red-600 transition-colors duration-200",
                 collapsed && "justify-center",
               )}
             >

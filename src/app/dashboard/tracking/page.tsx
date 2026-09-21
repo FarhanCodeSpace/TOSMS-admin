@@ -26,6 +26,7 @@ import toast from "react-hot-toast";
 
 import EmptyState from "@/components/ui/EmptyState";
 import Modal from "@/components/ui/Modal";
+import { RideStatusBadge } from "@/components/ui/RideStatusBadge";
 import { useAuth } from "@/context/AuthContext";
 import { COLLECTIONS } from "@/lib/collections";
 import { db } from "@/lib/firebase";
@@ -56,6 +57,7 @@ const TrackingMap = dynamic(() => import("@/components/tracking/TrackingMap"), {
 export type ActiveTrackingRide = {
   driverId: string;
   rideId: string;
+  status?: string;
   latitude?: number;
   longitude?: number;
   speed?: number;
@@ -138,54 +140,7 @@ function rideDateKey(ride: Ride): string {
   return "";
 }
 
-function RideStatusBadge({ status }: { status: Ride["status"] | "waiting" | "accepted" | "expired" }) {
-  if (status === "waiting") {
-    return (
-      <span className="inline-flex rounded-full bg-yellow-100 px-3 py-1 text-xs font-semibold text-yellow-800">
-        Waiting
-      </span>
-    );
-  }
 
-  if (status === "active") {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-        Active
-      </span>
-    );
-  }
-
-  if (status === "scheduled") {
-    return (
-      <span className="inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-700">
-        Scheduled
-      </span>
-    );
-  }
-
-  if (status === "completed") {
-    return (
-      <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-        Completed
-      </span>
-    );
-  }
-
-  if (status === "auto_cancelled" || status === "cancelled" || (status as string) === "not_completed") {
-    return (
-      <span className="inline-flex rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">
-        Cancelled
-      </span>
-    );
-  }
-
-  return (
-    <span className="inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">
-      Cancelled
-    </span>
-  );
-}
 
 function EarlyRideBadge() {
   return (
@@ -200,6 +155,8 @@ type RideDetailModalProps = {
   ride: RideWithMeta | null;
   isEarlyRide: boolean;
   driverProfile?: User | null;
+  allUsersById?: Record<string, User>;
+  allStudentsById?: Record<string, User>;
   onClose: () => void;
   onGoLive: (() => void) | null;
 };
@@ -208,13 +165,52 @@ function RideDetailModal({
   ride,
   isEarlyRide,
   driverProfile,
+  allUsersById,
+  allStudentsById,
   onClose,
   onGoLive,
 }: RideDetailModalProps) {
   if (!ride) return null;
 
   const todayDateString = new Date().toISOString().split('T')[0];
-  const displayStatus = (ride.date < todayDateString && (ride.status === 'active' || ride.status === 'scheduled')) ? 'cancelled' : ride.status;
+  let displayStatus = (ride.date < todayDateString && (ride.status === 'active' || ride.status === 'scheduled')) ? 'cancelled' : ride.status;
+
+  const isActuallyEarlyRide = Boolean(
+    isEarlyRide ||
+    ride.isEarlyRide || 
+    (ride as any).source === 'earlyRideSharing' || 
+    (ride as any).rideType === 'early' || 
+    (ride as any).collectionSource === 'EARLY_RIDE_REQUESTS' ||
+    Array.isArray((ride as any).studentsJoined)
+  );
+
+  if (isActuallyEarlyRide && (displayStatus === 'scheduled' || displayStatus === 'accepted')) {
+    displayStatus = 'accepted';
+  }
+
+  let displayBoys = 0;
+  let displayGirls = 0;
+  let displayTotal = 1;
+
+  if (isActuallyEarlyRide) {
+    let calculatedMales = 0;
+    let calculatedFemales = 0;
+    const studentsList = Array.isArray((ride as any).studentsJoined) ? (ride as any).studentsJoined : [];
+
+    studentsList.forEach((s: any) => {
+      const studentId = typeof s === 'string' ? s : (s.id || s.studentId);
+      // Use the globally fetched dictionary here!
+      const profile = allStudentsById?.[studentId] || s; 
+      const gender = (profile as any)?.gender?.toLowerCase();
+
+      if (gender === 'male') calculatedMales++;
+      if (gender === 'female') calculatedFemales++;
+    });
+
+    displayBoys = (ride as any).maleCount ?? calculatedMales;
+    displayGirls = (ride as any).femaleCount ?? calculatedFemales;
+    displayTotal = (ride as any).totalStudents ?? (studentsList.length > 0 ? studentsList.length : Math.max(1, displayBoys + displayGirls));
+  }
 
   return (
     <Modal open={Boolean(ride)} onClose={onClose} title="Ride Details">
@@ -223,7 +219,7 @@ function RideDetailModal({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-lg font-bold text-slate-900">{ride.routeName}</h3>
             <div className="flex flex-wrap items-center gap-2">
-              {isEarlyRide ? <EarlyRideBadge /> : null}
+              {isActuallyEarlyRide ? <EarlyRideBadge /> : null}
               <RideStatusBadge status={displayStatus} />
             </div>
           </div>
@@ -231,7 +227,7 @@ function RideDetailModal({
             <p>
               Driver:{" "}
               <span className="font-semibold text-slate-900">
-                {ride.driverName || "Unassigned"}
+                {driverProfile?.fullName || ride.driverName || "Unassigned"}
               </span>
             </p>
             <p>
@@ -268,23 +264,19 @@ function RideDetailModal({
           </div>
         </div>
 
-        {isEarlyRide ? (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
-              <Users className="h-5 w-5 text-emerald-500" />
-              Students: {(ride as any).boardedCount || 0} (👦 {(ride as any).boysCount || 0} 👧 {(ride as any).girlsCount || 0})
+        {isActuallyEarlyRide ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-gray-50 px-3 py-3 text-sm font-semibold text-slate-900">
+                <Users className="h-5 w-5 text-emerald-600" />
+                Students: {displayTotal} (👦 {displayBoys} 👧 {displayGirls})
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
+                <Bus className="h-5 w-5 text-blue-500" />
+                Vehicle: {driverProfile?.vehicleType || (ride as any).vehicle?.name || (ride as any).vehicleType || "TBD"} - {driverProfile?.vehiclePlate || (ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || "TBD"}
+              </div>
             </div>
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
-              <Bus className="h-5 w-5 text-blue-500" />
-              Vehicle: {(ride as any).vehicle?.name || (ride as any).vehicleType || "TBD"} - {(ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || "TBD"}
-            </div>
-          </div>
         ) : (
           <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
-              <Bus className="h-5 w-5 text-blue-500" />
-              Vehicle: {driverProfile?.vehicleType || (ride as any).vehicleType || "TBD"} - {driverProfile?.vehiclePlate || (ride as any).vehiclePlate || "TBD"}
-            </div>
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex justify-between items-center px-1">
                 <div className="flex flex-col items-center">
@@ -309,7 +301,7 @@ function RideDetailModal({
             </div>
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
               <Bus className="h-5 w-5 text-blue-500" />
-              Vehicle: {(ride as any).vehicleType || "TBD"} - {(ride as any).vehiclePlate || "TBD"}
+              Vehicle: {driverProfile?.vehicleType || (ride as any).vehicle?.name || (ride as any).vehicleType || "TBD"} - {driverProfile?.vehiclePlate || (ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || "TBD"}
             </div>
           </div>
         )}
@@ -375,6 +367,23 @@ export default function TrackingPage() {
         });
         setAllDriversById(map);
       }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const [allStudentsById, setAllStudentsById] = useState<Record<string, User>>({});
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      query(collection(db, COLLECTIONS.USERS), where("role", "==", "student")),
+      (snapshot) => {
+        const nextStudents: Record<string, User> = {};
+        snapshot.docs.forEach((doc) => {
+          nextStudents[doc.id] = { uid: doc.id, ...doc.data() } as User;
+        });
+        setAllStudentsById(nextStudents);
+      },
+      (error) => console.error("Student lookup failed:", error)
     );
     return () => unsubscribe();
   }, []);
@@ -603,16 +612,28 @@ export default function TrackingPage() {
     let cancelled = false;
     setIsHistoryLoading(true);
 
-    getDocs(
-      query(
-        collection(db, COLLECTIONS.RIDES),
-        where("date", ">=", rangeStart),
-        where("date", "<=", rangeEnd),
+    const rangeStartQuery = new Date(rangeStart + "T00:00:00");
+    const rangeEndQuery = new Date(rangeEnd + "T23:59:59.999");
+
+    Promise.all([
+      getDocs(
+        query(
+          collection(db, COLLECTIONS.RIDES),
+          where("date", ">=", rangeStart),
+          where("date", "<=", rangeEnd),
+        ),
       ),
-    )
-      .then((snapshot) => {
+      getDocs(
+        query(
+          collection(db, COLLECTIONS.EARLY_RIDE_REQUESTS),
+          where("createdAt", ">=", Timestamp.fromDate(rangeStartQuery)),
+          where("createdAt", "<=", Timestamp.fromDate(rangeEndQuery)),
+        ),
+      )
+    ])
+      .then(([ridesSnapshot, earlySnapshot]) => {
         if (cancelled) return;
-        const rides = snapshot.docs.map((rideDoc) => {
+        const rides = ridesSnapshot.docs.map((rideDoc) => {
           const data = rideDoc.data() as RideWithMeta;
           return {
             ...data,
@@ -622,7 +643,46 @@ export default function TrackingPage() {
               : "scheduled",
           };
         });
-        setHistoryRides(rides);
+
+        const mappedEarly: RideWithMeta[] = earlySnapshot.docs.map(doc => ({...doc.data(), requestId: doc.id} as EarlyRideRequest)).filter(req => !req.rideId).map(req => {
+          let mappedStatus = req.status as any;
+          if (mappedStatus === "accepted") mappedStatus = "active";
+          
+          if (mappedStatus === "waiting" || mappedStatus === "active") {
+            const d = req.createdAt?.toDate();
+            if (d) {
+              const offset = d.getTimezoneOffset() * 60000;
+              const dateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
+              if (dateStr < todayKey) {
+                mappedStatus = "expired";
+              }
+            }
+          }
+
+          const d = req.createdAt?.toDate();
+          const dateStr = d ? new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0] : rangeStart;
+
+          return {
+            rideId: req.requestId,
+            routeId: req.route,
+            routeName: req.route,
+            assignedDriverId: req.acceptedDriverId || "",
+            driverName: "Early Ride Driver",
+            date: dateStr,
+            departureTime: req.createdAt ? formatTimeTo12Hour(req.createdAt.toDate()) : "TBD",
+            status: mappedStatus,
+            boardedCount: req.studentsJoined ? req.studentsJoined.length : 0,
+            studentIds: req.studentsJoined ? req.studentsJoined.map(s => s.studentId) : [],
+            createdAt: req.createdAt,
+            isEarlyRide: true,
+            vehicle: req.vehicle,
+            boysCount: req.boysCount || 0,
+            girlsCount: req.girlsCount || 0,
+            statusReason: req.statusReason
+          } as RideWithMeta & { vehicle?: any; boysCount?: number; girlsCount?: number; statusReason?: string };
+        });
+
+        setHistoryRides([...rides, ...mappedEarly]);
       })
       .catch((error) => {
         console.error("Error fetching ride history:", error);
@@ -638,7 +698,7 @@ export default function TrackingPage() {
     return () => {
       cancelled = true;
     };
-  }, [authLoading, currentUser, viewMode, rangeStart, rangeEnd]);
+  }, [authLoading, currentUser, viewMode, rangeStart, rangeEnd, todayKey]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -987,6 +1047,10 @@ export default function TrackingPage() {
               <option value="active">Active</option>
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
+              <option value="waiting">Waiting</option>
+              <option value="withdrawn">Withdrawn</option>
+              <option value="rejected">Rejected</option>
+              <option value="expired">Expired</option>
             </select>
           ) : null}
         </div>
@@ -1046,6 +1110,32 @@ export default function TrackingPage() {
                 {liveList.map((ride) => {
                   const isSelected = selectedRideId === ride.rideId;
 
+                  const isActuallyEarlyRide = ride.isEarlyRide || earlyRideRideIds.has(ride.rideId);
+
+                  let displayBoys = 0;
+                  let displayGirls = 0;
+                  let displayTotal = 1;
+
+                  if (isActuallyEarlyRide) {
+                    let calculatedMales = 0;
+                    let calculatedFemales = 0;
+                    const studentsList = Array.isArray((ride as any).studentsJoined) ? (ride as any).studentsJoined : [];
+
+                    studentsList.forEach((s: any) => {
+                      const studentId = typeof s === 'string' ? s : (s.id || s.studentId);
+                      // Use the globally fetched dictionary here!
+                      const profile = allStudentsById?.[studentId] || s; 
+                      const gender = (profile as any)?.gender?.toLowerCase();
+
+                      if (gender === 'male') calculatedMales++;
+                      if (gender === 'female') calculatedFemales++;
+                    });
+
+                    displayBoys = (ride as any).maleCount ?? calculatedMales;
+                    displayGirls = (ride as any).femaleCount ?? calculatedFemales;
+                    displayTotal = (ride as any).totalStudents ?? (studentsList.length > 0 ? studentsList.length : Math.max(1, displayBoys + displayGirls));
+                  }
+
                   return (
                     <button
                       key={`${ride.driverId}_${ride.rideId}`}
@@ -1100,20 +1190,35 @@ export default function TrackingPage() {
                             )}
                           </div>
                           
-                          <div className="mt-3 flex items-center gap-2 text-[10px] font-semibold">
-                            <div className="flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
-                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                              {ride.availabilityStats?.available || 0} Available
+                          {!ride.isEarlyRide ? (
+                            <div className="mt-3 flex items-center gap-2 text-[10px] font-semibold">
+                              <div className="flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                                {ride.availabilityStats?.available || 0} Available
+                              </div>
+                              <div className="flex items-center gap-1 text-rose-700 bg-rose-50 px-2 py-1 rounded">
+                                <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
+                                {ride.availabilityStats?.notAvailable || 0} Not Available
+                              </div>
+                              <div className="flex items-center gap-1 text-slate-600 bg-slate-100 px-2 py-1 rounded">
+                                <div className="w-1.5 h-1.5 rounded-full bg-slate-400"></div>
+                                {ride.availabilityStats?.noResponse || 0} No Response
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1 text-rose-700 bg-rose-50 px-2 py-1 rounded">
-                              <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div>
-                              {ride.availabilityStats?.notAvailable || 0} Not Available
-                            </div>
-                            <div className="flex items-center gap-1 text-slate-600 bg-slate-100 px-2 py-1 rounded">
-                              <div className="w-1.5 h-1.5 rounded-full bg-slate-400"></div>
-                              {ride.availabilityStats?.noResponse || 0} No Response
-                            </div>
-                          </div>
+                          ) : (
+                                <div className="flex flex-col gap-2 mt-2">
+                                  <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded-md">
+                                    <Users className="w-4 h-4" />
+                                    <span>
+                                      Students: {displayTotal} (👦 {displayBoys} 👧 {displayGirls})
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded-md">
+                                    <Bus className="w-4 h-4" />
+                                    <span>Vehicle: {(ride as any).vehicle?.name || (ride as any).vehicleType || 'TBD'} - {(ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || 'TBD'}</span>
+                                  </div>
+                                </div>
+                          )}
 
                           {ride.routeStops && ride.routeStops.length > 0 && (
                             <div className="mt-4 pt-3 border-t border-[var(--border)]">
@@ -1152,6 +1257,33 @@ export default function TrackingPage() {
                   const todayDateString = new Date().toISOString().split('T')[0];
                   const displayStatus = (ride.date < todayDateString && (ride.status === 'active' || ride.status === 'scheduled')) ? 'cancelled' : ride.status;
                   const isLive = displayStatus === "active";
+                  const currentDriver = allDriversById[(ride as any).driverId || ride.assignedDriverId];
+                  
+                  const isActuallyEarlyRide = ride.isEarlyRide || earlyRideRideIds.has(ride.rideId);
+
+                  let displayBoys = 0;
+                  let displayGirls = 0;
+                  let displayTotal = 1;
+
+                  if (isActuallyEarlyRide) {
+                    let calculatedMales = 0;
+                    let calculatedFemales = 0;
+                    const studentsList = Array.isArray((ride as any).studentsJoined) ? (ride as any).studentsJoined : [];
+
+                    studentsList.forEach((s: any) => {
+                      const studentId = typeof s === 'string' ? s : (s.id || s.studentId);
+                      // Use the globally fetched dictionary here!
+                      const profile = allStudentsById?.[studentId] || s; 
+                      const gender = (profile as any)?.gender?.toLowerCase();
+
+                      if (gender === 'male') calculatedMales++;
+                      if (gender === 'female') calculatedFemales++;
+                    });
+
+                    displayBoys = (ride as any).maleCount ?? calculatedMales;
+                    displayGirls = (ride as any).femaleCount ?? calculatedFemales;
+                    displayTotal = (ride as any).totalStudents ?? (studentsList.length > 0 ? studentsList.length : Math.max(1, displayBoys + displayGirls));
+                  }
 
                   return (
                     <div
@@ -1160,6 +1292,8 @@ export default function TrackingPage() {
                         displayStatus === "waiting" ? "border-t-yellow-400" :
                         displayStatus === "scheduled" ? "border-t-blue-500" :
                         (displayStatus === "active" || displayStatus === "completed") ? "border-t-emerald-500" :
+                        displayStatus === "withdrawn" ? "border-t-orange-500" :
+                        displayStatus === "rejected" ? "border-t-[#8B4513]" :
                         "border-t-red-500"
                       }`}
                     >
@@ -1206,26 +1340,48 @@ export default function TrackingPage() {
 
                         <hr className="my-3 border-gray-100" />
 
-                        <div className="flex justify-between items-center px-1">
-                          <div className="flex flex-col items-center">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Available</span>
-                            <span className="text-sm font-bold text-emerald-600">
-                              {(ride as any).availabilityStats?.available || 0}
-                            </span>
+                        {!isEarly ? (
+                          <>
+                            <div className="flex justify-between items-center px-1">
+                              <div className="flex flex-col items-center">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Available</span>
+                                <span className="text-sm font-bold text-emerald-600">
+                                  {(ride as any).availabilityStats?.available || 0}
+                                </span>
+                              </div>
+                              <div className="flex flex-col items-center">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">Unavailable</span>
+                                <span className="text-sm font-bold text-red-600">
+                                  {(ride as any).availabilityStats?.notAvailable || 0}
+                                </span>
+                              </div>
+                              <div className="flex flex-col items-center">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">No Response</span>
+                                <span className="text-sm font-bold text-slate-600">
+                                  {(ride as any).availabilityStats?.noResponse || 0}
+                                </span>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-2 text-sm text-gray-600 mt-3 bg-gray-50 p-2 rounded-md">
+                               <Bus className="w-4 h-4" />
+                               <span>Vehicle: {allDriversById[ride.assignedDriverId]?.vehicleType || (ride as any).vehicle?.name || (ride as any).vehicleType || 'TBD'} - {allDriversById[ride.assignedDriverId]?.vehiclePlate || (ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || 'TBD'}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-col gap-2 mt-2">
+                            <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded-md">
+                              <Users className="w-4 h-4" />
+                              <span>
+                                Students: {displayTotal} (👦 {displayBoys} 👧 {displayGirls})
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded-md">
+                              <Bus className="w-4 h-4" />
+                              <span>Vehicle: {currentDriver?.vehicleType || (currentDriver as any)?.vehicle?.type || (ride as any).vehicle?.name || (ride as any).vehicleType || 'TBD'} - {currentDriver?.vehiclePlate || (currentDriver as any)?.vehicle?.plateNumber || (ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || 'TBD'}</span>
+                            </div>
                           </div>
-                          <div className="flex flex-col items-center">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-red-600">Unavailable</span>
-                            <span className="text-sm font-bold text-red-600">
-                              {(ride as any).availabilityStats?.notAvailable || 0}
-                            </span>
-                          </div>
-                          <div className="flex flex-col items-center">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">No Response</span>
-                            <span className="text-sm font-bold text-slate-600">
-                              {(ride as any).availabilityStats?.noResponse || 0}
-                            </span>
-                          </div>
-                        </div>
+                        )}
                         
                         <div className="mt-4 flex gap-2">
                           <button
@@ -1299,7 +1455,9 @@ export default function TrackingPage() {
       <RideDetailModal
         ride={selectedRide}
         isEarlyRide={selectedRide ? (selectedRide.isEarlyRide || earlyRideRideIds.has(selectedRide.rideId)) : false}
-        driverProfile={selectedRide ? allDriversById[selectedRide.assignedDriverId] : null}
+        driverProfile={selectedRide ? allDriversById[(selectedRide as any).driverId || selectedRide.assignedDriverId] : null}
+        allUsersById={allDriversById}
+        allStudentsById={allStudentsById}
         onClose={() => setSelectedRide(null)}
         onGoLive={() => selectedRide && goLive(selectedRide)}
       />

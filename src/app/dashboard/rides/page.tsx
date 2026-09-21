@@ -39,6 +39,7 @@ import {
 } from "@/utils/formatters";
 import { getRouteAssignedDriverIds } from "@/utils/routeAssignments";
 import { buildAvailabilityMap, getStudentAvailabilityStats } from "@/utils/availabilityHelpers";
+import { RideStatusBadge } from "@/components/ui/RideStatusBadge";
 
 type RideWithMeta = Ride & {
   activeAt?: Timestamp;
@@ -54,56 +55,6 @@ type AvailableStudentEntry = {
   pickupStop?: string;
 };
 
-function RideStatusBadge({ status }: { status: Ride["status"] | "waiting" | "accepted" | "expired" }) {
-  if (status === "waiting") {
-    return (
-      <span className="inline-flex rounded-full bg-yellow-100 px-3 py-1 text-xs font-semibold text-yellow-800">
-        Waiting
-      </span>
-    );
-  }
-
-  if (status === "scheduled") {
-    return (
-      <span className="inline-flex rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700">
-        Scheduled
-      </span>
-    );
-  }
-
-  if (status === "active") {
-    return (
-      <span className="inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-        <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-        Active
-      </span>
-    );
-  }
-
-  if (status === "completed") {
-    return (
-      <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-        Completed
-      </span>
-    );
-  }
-
-  if (status === "auto_cancelled" || status === "cancelled" || (status as string) === "not_completed") {
-    return (
-      <span className="inline-flex rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
-        Cancelled
-      </span>
-    );
-  }
-
-  const defaultText = status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, " ");
-
-  return (
-    <span className="inline-flex rounded-full bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700">
-      {defaultText}
-    </span>
-  );
-}
 
 type RideDetailModalProps = {
   open: boolean;
@@ -166,7 +117,21 @@ function RideDetailModal({
   if (!ride) return null;
 
   const todayDateString = new Date().toISOString().split('T')[0];
-  const displayStatus = (ride.date < todayDateString && (ride.status === 'active' || ride.status === 'scheduled')) ? 'cancelled' : ride.status;
+  let displayStatus = (ride.date < todayDateString && (ride.status === 'active' || ride.status === 'scheduled')) ? 'cancelled' : ride.status;
+
+  const isActuallyEarlyRide = Boolean(
+    ride.isEarlyRide || 
+    (ride as any).source === 'earlyRideSharing' || 
+    (ride as any).rideType === 'early' || 
+    (ride as any).collectionSource === 'EARLY_RIDE_REQUESTS' ||
+    Array.isArray((ride as any).studentsJoined)
+  );
+
+  if (isActuallyEarlyRide && (displayStatus === 'scheduled' || displayStatus === 'accepted')) {
+    displayStatus = 'accepted';
+  }
+
+  const driverProfile = studentsById.get(ride.assignedDriverId);
 
   return (
     <Modal open={open} onClose={onClose} title="Ride Details">
@@ -217,18 +182,34 @@ function RideDetailModal({
           </div>
         </div>
 
-        {ride.isEarlyRide ? (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
-              <Users className="h-5 w-5 text-emerald-500" />
-              Students: {(ride as any).boardedCount || availableStudents.length} (👦 {(ride as any).boysCount || 0} 👧 {(ride as any).girlsCount || 0})
+        {isActuallyEarlyRide ? (() => {
+          let displayBoys = (ride as any).boysCount || 0;
+          let displayGirls = (ride as any).girlsCount || 0;
+
+          if (displayBoys === 0 && displayGirls === 0 && (ride.status === 'withdrawn' || ride.status === 'cancelled' || (ride as any).studentsJoined?.length === 0)) {
+             const creatorGender = (ride as any).creatorGender || (ride as any).requestedBy?.gender?.toLowerCase() || (ride as any).studentGender?.toLowerCase();
+             if (creatorGender === 'female' || creatorGender === 'girl') {
+                 displayGirls = 1;
+             } else {
+                 displayBoys = 1; 
+             }
+          }
+
+          const displayTotal = (ride as any).totalStudents || ((ride as any).studentsJoined?.length > 0 ? (ride as any).studentsJoined.length : 1);
+
+          return (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-gray-50 px-3 py-3 text-sm font-semibold text-slate-900">
+                <Users className="h-5 w-5 text-emerald-600" />
+                Students: {displayTotal} (👦 {displayBoys} 👧 {displayGirls})
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
+                <Bus className="h-5 w-5 text-blue-500" />
+                Vehicle: {(ride as any).vehicle?.name || (ride as any).vehicleType || "TBD"} - {(ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || "TBD"}
+              </div>
             </div>
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
-              <Bus className="h-5 w-5 text-blue-500" />
-              Vehicle: {(ride as any).vehicle?.name || (ride as any).vehicleType || "TBD"} - {(ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || "TBD"}
-            </div>
-          </div>
-        ) : (
+          );
+        })() : (
           <div className="flex flex-col gap-3">
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex justify-between items-center px-1">
@@ -254,7 +235,7 @@ function RideDetailModal({
             </div>
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-900">
               <Bus className="h-5 w-5 text-blue-500" />
-              Vehicle: {(ride as any).vehicleType || "TBD"} - {(ride as any).vehiclePlate || "TBD"}
+              Vehicle: {driverProfile?.vehicleType || (ride as any).vehicle?.name || (ride as any).vehicleType || "TBD"} - {driverProfile?.vehiclePlate || (ride as any).vehicle?.plateNumber || (ride as any).vehiclePlate || "TBD"}
             </div>
           </div>
         )}
@@ -271,6 +252,22 @@ export default function RidesPage() {
   const [studentsById, setStudentsById] = useState<Map<string, User>>(
     new Map(),
   );
+  const [allStudentsById, setAllStudentsById] = useState<Record<string, User>>({});
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      query(collection(db, COLLECTIONS.USERS), where("role", "==", "student")),
+      (snapshot) => {
+        const nextStudents: Record<string, User> = {};
+        snapshot.docs.forEach((doc) => {
+          nextStudents[doc.id] = { uid: doc.id, ...doc.data() } as User;
+        });
+        setAllStudentsById(nextStudents);
+      },
+      (error) => console.error("Student lookup failed:", error)
+    );
+    return () => unsubscribe();
+  }, []);
 
   const [todayRides, setTodayRides] = useState<RideWithMeta[]>([]);
   const [isTodayRidesLoading, setIsTodayRidesLoading] = useState(true);
@@ -683,15 +680,20 @@ export default function RidesPage() {
       const todayDateString = new Date().toISOString().split('T')[0];
       const displayStatus = (ride.date < todayDateString && (ride.status === 'active' || ride.status === 'scheduled')) ? 'cancelled' : ride.status;
 
+      const isEarly = ride.isEarlyRide || earlyRideRideIds.has(ride.rideId);
+      const availableCountVal = isEarly ? ((ride as any).boardedCount || 1) : stats.availableCount;
+      const notAvailableCountVal = isEarly ? 0 : stats.notAvailableCount;
+      const noResponseCountVal = isEarly ? 0 : stats.noResponseCount;
+
       return [
         ride.date,
         `"${ride.routeName}"`,
         `"${ride.driverName || 'Unassigned'}"`,
         `"${schedule}"`,
         displayStatus,
-        stats.availableCount.toString(),
-        stats.notAvailableCount.toString(),
-        stats.noResponseCount.toString()
+        availableCountVal.toString(),
+        notAvailableCountVal.toString(),
+        noResponseCountVal.toString()
       ];
     });
 
@@ -891,11 +893,12 @@ export default function RidesPage() {
                 const studentIds = route?.studentIds || [];
                 
                 const stats = getStudentAvailabilityStats(studentIds, ride.routeId, todayAvailabilityMap);
-                const driverProfile = studentsById.get(ride.assignedDriverId);
+                const driverProfile = studentsById.get((ride as any).driverId || ride.assignedDriverId);
                 const enrichedRide = {
                   ...ride,
-                  vehicleType: (ride as any).vehicleType || driverProfile?.vehicleType,
-                  vehiclePlate: (ride as any).vehiclePlate || driverProfile?.vehiclePlate
+                  driverName: driverProfile?.fullName || ride.driverName,
+                  vehicleType: driverProfile?.vehicleType || (ride as any).vehicleType,
+                  vehiclePlate: driverProfile?.vehiclePlate || (ride as any).vehiclePlate
                 };
 
                 return (
@@ -906,6 +909,7 @@ export default function RidesPage() {
                     availableStudentsCount={stats.availableCount}
                     notAvailableStudentsCount={stats.notAvailableCount}
                     noResponseCount={stats.noResponseCount}
+                    studentsById={allStudentsById}
                     onViewDetails={() => setDetailModalRide({
                       ...enrichedRide,
                       availabilityStats: {
@@ -1025,6 +1029,7 @@ export default function RidesPage() {
                   const studentIds = route?.studentIds || [];
                   const stats = getStudentAvailabilityStats(studentIds, ride.routeId, allAvailabilityMap, ride.date);
                   const availableCount = stats.availableCount;
+                  const isEarlyRow = Boolean(ride.isEarlyRide || earlyRideRideIds.has(ride.rideId) || (ride as any).source === 'earlyRideSharing' || (ride as any).rideType === 'early');
 
                   return (
                     <tr
@@ -1044,7 +1049,7 @@ export default function RidesPage() {
                           <span className="font-semibold text-slate-900">
                             {ride.routeName}
                           </span>
-                          {ride.isEarlyRide || earlyRideRideIds.has(ride.rideId) ? (
+                          {isEarlyRow ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                               <Zap fill="currentColor" size={12} />
                               Early Ride
@@ -1070,10 +1075,12 @@ export default function RidesPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
-                        <RideStatusBadge status={ride.status} />
+                        <RideStatusBadge status={isEarlyRow && (ride.status === 'scheduled' || ride.status === 'accepted') ? 'accepted' : ride.status} />
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
-                        {availableCount}
+                        {isEarlyRow
+                          ? ((ride as any).totalStudents ?? (ride as any).studentsJoined?.length ?? 0) 
+                          : (availableCount ?? 0)}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-700">
                         <div

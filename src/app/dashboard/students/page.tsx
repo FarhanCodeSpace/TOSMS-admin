@@ -23,6 +23,7 @@ import { db } from "@/lib/firebase";
 import { COLLECTIONS } from "@/lib/collections";
 import { User, Route, FeePayment } from "@/types";
 import Badge from "@/components/ui/Badge";
+import FeeStatusBadge from "@/components/ui/FeeStatusBadge";
 import { formatDisplayPhone } from "@/lib/utils";
 import StatsCard from "@/components/ui/StatsCard";
 import StudentCard from "@/components/students/StudentCard";
@@ -52,11 +53,38 @@ type StudentWithDetails = User & {
   assignedRoutesDetails: AssignedRouteDetail[];
   routeName?: string;
   assignedRouteNames?: string[];
-  feeStatus?: "verified" | "submitted" | "due" | "exempt" | "no_data";
+  feeStatus?: "verified" | "submitted" | "due" | "exempt" | "no_data" | string;
+  paymentRecord?: FeePaymentWithFallback;
 };
 
 type FeePaymentWithFallback = FeePayment & {
   fareAmount?: number;
+};
+
+const isStudentFeeUnpaid = (student: StudentWithDetails) => {
+  const status = (student.paymentRecord?.paymentStatus || student.feeStatus || "").toLowerCase();
+  const method = (student.paymentRecord?.paymentMethod || "").toLowerCase();
+  const isExempt = student.paymentRecord?.feeExempt || student.feeStatus === "exempt";
+
+  if (isExempt || status === "exempt" || status === "no_data") return false;
+  if (status === "verified" || status === "paid") return false;
+
+  const isOnline = method.includes("card") || method.includes("paddle");
+
+  if (
+    status === "pending" ||
+    status === "due" ||
+    status === "unpaid" ||
+    status === "overdue"
+  ) {
+    return true;
+  }
+
+  if (status === "submitted") {
+    return isOnline; // Online submitted payments are considered unpaid until verified
+  }
+
+  return false;
 };
 
 const ITEMS_PER_PAGE = 20;
@@ -261,8 +289,7 @@ export default function StudentsPage() {
         (rDetail) => (routeFeeById.get(rDetail.routeId) || 0) > 0
       );
 
-      let feeStatus: "verified" | "submitted" | "due" | "exempt" | "no_data" =
-        "no_data";
+      let feeStatus: "verified" | "submitted" | "due" | "exempt" | "no_data" | string = "no_data";
       if (payment) {
         if (isFeeExempt(payment)) {
           feeStatus = "exempt";
@@ -283,6 +310,7 @@ export default function StudentsPage() {
         assignedRouteNames: assignedRoutesDetails.map((r) => r.routeName),
         routeName: assignedRoutesDetails.map((r) => r.routeName).join(", "),
         feeStatus,
+        paymentRecord: payment,
       };
     });
   }, [students, routes, feePayments]);
@@ -324,8 +352,9 @@ export default function StudentsPage() {
       // Status filter
       if (filterStatus === "assigned" && student.assignedRoutesDetails.length === 0) return false;
       if (filterStatus === "unassigned" && student.assignedRoutesDetails.length > 0) return false;
-      if (filterStatus === "fee_due" && student.feeStatus !== "due")
+      if (filterStatus === "fee_due" && !isStudentFeeUnpaid(student)) {
         return false;
+      }
 
       return true;
     });
@@ -343,7 +372,7 @@ export default function StudentsPage() {
     const total = enrichedStudents.length;
     const assigned = enrichedStudents.filter((s) => s.assignedRoutesDetails.length > 0).length;
     const unassigned = total - assigned;
-    const feeDue = enrichedStudents.filter((s) => s.feeStatus === "due").length;
+    const feeDue = enrichedStudents.filter(isStudentFeeUnpaid).length;
 
     return { total, assigned, unassigned, feeDue };
   }, [enrichedStudents]);
@@ -922,17 +951,11 @@ export default function StudentsPage() {
                   )}
                 </td>
                 <td className="px-6 py-4 min-w-[130px]">
-                  <Badge status={student.feeStatus || "no_data"}>
-                    {student.feeStatus === "verified"
-                      ? "Verified"
-                      : student.feeStatus === "exempt"
-                        ? "Exempt"
-                        : student.feeStatus === "submitted"
-                          ? "Submitted"
-                          : student.feeStatus === "due"
-                            ? "Due"
-                            : "No Fee"}
-                  </Badge>
+                  <FeeStatusBadge
+                    status={student.paymentRecord?.paymentStatus || student.feeStatus}
+                    method={student.paymentRecord?.paymentMethod}
+                    isExempt={student.paymentRecord?.feeExempt || student.feeStatus === "exempt"}
+                  />
                 </td>
                 <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap min-w-[140px]">
                   {student.createdAt
