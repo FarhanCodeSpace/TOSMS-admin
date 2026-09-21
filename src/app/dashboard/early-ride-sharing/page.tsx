@@ -100,7 +100,7 @@ function RequestDetails({
     : driver
       ? [driver.vehicleType, driver.vehiclePlate].filter(Boolean).join(" • ") || "N/A"
       : "N/A";
-  
+
   const routeRecord = routes.find(r => r.routeName === request.route || r.routeId === request.route);
   const sortedStops = [...(routeRecord?.stops || [])].sort((a, b) => a.order - b.order);
 
@@ -128,7 +128,7 @@ function RequestDetails({
               {driverLabel}
             </span>
             {driver && (
-              <button 
+              <button
                 onClick={() => onViewDriver(driver)}
                 className="p-1 hover:bg-[var(--border)] rounded text-[var(--text-muted)] transition-colors"
                 title="View Driver Details"
@@ -210,12 +210,12 @@ function RequestDetails({
               let displayGirls = ride.girlsCount || 0;
 
               if (displayBoys === 0 && displayGirls === 0 && (ride.status === 'withdrawn' || ride.status === 'cancelled' || ride.studentsJoined?.length === 0)) {
-                 const creatorGender = ride.creatorGender || ride.requestedBy?.gender?.toLowerCase() || ride.studentGender?.toLowerCase();
-                 if (creatorGender === 'female' || creatorGender === 'girl') {
-                     displayGirls = 1;
-                 } else {
-                     displayBoys = 1; 
-                 }
+                const creatorGender = ride.creatorGender || ride.requestedBy?.gender?.toLowerCase() || ride.studentGender?.toLowerCase();
+                if (creatorGender === 'female' || creatorGender === 'girl') {
+                  displayGirls = 1;
+                } else {
+                  displayBoys = 1;
+                }
               }
 
               const displayTotal = ride.totalStudents || (ride.studentsJoined?.length > 0 ? ride.studentsJoined.length : 1);
@@ -273,7 +273,7 @@ function RequestDetails({
                     {student.gender}
                   </Badge>
                   {studentsById[student.studentId] && (
-                    <button 
+                    <button
                       onClick={() => onViewStudent(studentsById[student.studentId])}
                       className="p-1 hover:bg-[var(--border)] rounded text-[var(--text-muted)] transition-colors"
                       title="View Student Details"
@@ -327,7 +327,7 @@ export default function EarlyRideSharingPage() {
   const [driversById, setDriversById] = useState<Record<string, User>>({});
   const [studentsById, setStudentsById] = useState<Record<string, User>>({});
   const [routes, setRoutes] = useState<Route[]>([]);
-  
+
   const [activeFilter, setActiveFilter] = useState<StatusFilter>("all");
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [selectedStudentForDetails, setSelectedStudentForDetails] = useState<User | null>(null);
@@ -562,23 +562,23 @@ export default function EarlyRideSharingPage() {
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {todayEarlyRides.map(({ request, displayStatus }) => {
               const ride = request as any;
-              
+
               let displayBoys = ride.boysCount || 0;
               let displayGirls = ride.girlsCount || 0;
 
               if (displayBoys === 0 && displayGirls === 0 && (ride.status === 'withdrawn' || ride.status === 'cancelled' || ride.studentsJoined?.length === 0)) {
-                  const creatorGender = ride.creatorGender || ride.requestedBy?.gender?.toLowerCase() || ride.studentGender?.toLowerCase();
-                  if (creatorGender === 'female' || creatorGender === 'girl') {
-                      displayGirls = 1;
-                  } else {
-                      displayBoys = 1; 
-                  }
+                const creatorGender = ride.creatorGender || ride.requestedBy?.gender?.toLowerCase() || ride.studentGender?.toLowerCase();
+                if (creatorGender === 'female' || creatorGender === 'girl') {
+                  displayGirls = 1;
+                } else {
+                  displayBoys = 1;
+                }
               }
               const displayTotal = ride.totalStudents || (ride.studentsJoined?.length > 0 ? ride.studentsJoined.length : 1);
 
               const resolvedDriverId = ride.driverId || request.acceptedDriverId;
               const driver = resolvedDriverId ? driversById[resolvedDriverId] : undefined;
-              
+
               const vehicleName = request.vehicle?.name || driver?.vehicleType || "TBD";
               const vehiclePlate = request.vehicle?.plateNumber || driver?.vehiclePlate || "TBD";
 
@@ -593,7 +593,7 @@ export default function EarlyRideSharingPage() {
                     </div>
                     <RideStatusBadge status={displayStatus} />
                   </div>
-                  
+
                   <div className="flex flex-col gap-2 mt-2">
                     <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-gray-50 px-3 py-3 text-sm font-semibold text-slate-900">
                       <Users className="h-5 w-5 text-emerald-600" />
@@ -604,7 +604,7 @@ export default function EarlyRideSharingPage() {
                       Vehicle: {vehicleName} - {vehiclePlate}
                     </div>
                   </div>
-                  
+
                   <div className="flex justify-between items-center mt-2">
                     <div className="flex gap-2">
                       {displayStatus === "waiting" && (
@@ -635,13 +635,13 @@ export default function EarlyRideSharingPage() {
                         </>
                       )}
                     </div>
-                     <button
-                        type="button"
-                        onClick={() => setSelectedRequestId(request.id)}
-                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                      >
-                        View Details
-                      </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRequestId(request.id)}
+                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                    >
+                      View Details
+                    </button>
                   </div>
                 </div>
               );
@@ -670,11 +670,10 @@ export default function EarlyRideSharingPage() {
                 key={key}
                 type="button"
                 onClick={() => setActiveFilter(key)}
-                className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                  active
+                className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition ${active
                     ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]"
                     : "border-[var(--border)] bg-[var(--surface-secondary)] text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
+                  }`}
               >
                 {label}
                 <span className="rounded-full bg-white/70 px-2 py-0.5 text-xs font-bold text-[var(--text)]">
@@ -769,12 +768,12 @@ export default function EarlyRideSharingPage() {
                           let displayGirls = ride.girlsCount || 0;
 
                           if (displayBoys === 0 && displayGirls === 0 && (ride.status === 'withdrawn' || ride.status === 'cancelled' || ride.studentsJoined?.length === 0)) {
-                             const creatorGender = ride.creatorGender || ride.requestedBy?.gender?.toLowerCase() || ride.studentGender?.toLowerCase();
-                             if (creatorGender === 'female' || creatorGender === 'girl') {
-                                 displayGirls = 1;
-                             } else {
-                                 displayBoys = 1; 
-                             }
+                            const creatorGender = ride.creatorGender || ride.requestedBy?.gender?.toLowerCase() || ride.studentGender?.toLowerCase();
+                            if (creatorGender === 'female' || creatorGender === 'girl') {
+                              displayGirls = 1;
+                            } else {
+                              displayBoys = 1;
+                            }
                           }
 
                           const displayTotal = ride.totalStudents || (ride.studentsJoined?.length > 0 ? ride.studentsJoined.length : 1);
